@@ -46,17 +46,27 @@ for ext in range(1, nextensions + 1):
 
     big_shape = (ny * nfiles, nx)
 
-    hdu = fits.ImageHDU(
+    # Preserve compression structure from original files
+    hdr = ext_headers[ext-1]
+
+    tile1 = hdr.get("ZTILE1", nx)
+    tile2 = hdr.get("ZTILE2", 1)
+    cmptype = hdr.get("ZCMPTYPE", "RICE_1")
+
+    hdu = fits.CompImageHDU(
         data=np.zeros(big_shape, dtype=np.float32),
-        header=ext_headers[ext-1],
-        name=f"EXT{ext}"
-        )
-    # Remove conflicting dimension keywords
-    for key in ["NAXIS", "NAXIS1", "NAXIS2"]:#, "PCOUNT", "GCOUNT"]:
-        if key in hdu.header:
-            del hdu.header[key]
+        header=hdr,
+        compression_type=cmptype,
+        tile_shape=(tile1, tile2)
+    )
+
+    # Preserve original extension name if present
+    if "EXTNAME" in hdr:
+        hdu.name = hdr["EXTNAME"]
+
     hdu.header["STITCHED"] = nfiles
     hdu.header["SRCFILE"] = files[0]
+
     hdul.append(hdu)
 
 hdul.writeto(outname, overwrite=True)
