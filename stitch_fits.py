@@ -19,7 +19,7 @@ out_path = file_path+'combined-fits/'
 os.makedirs(out_path, exist_ok=True)
 image = f'{img_type}_img_CV_250x3500x500_bin1x1_125*'
 
-files = sorted(glob.glob(file_path+'*/'+image))
+files = sorted(glob.glob(file_path+'03*/'+image, recursive=True))
 nfiles = len(files)
 
 # inspect first file to get dimensions
@@ -33,7 +33,7 @@ with fits.open(files[0], memmap=True) as f:
     for ext in [1,2,3,4]:
         ext_headers.append(f[ext].header.copy())
 print(ext_headers)
-outname = out_path+image[:-1]+'_stitched.fits'
+outname = out_path+image[:-1]+f'_{nfiles}_stitched.fits'
 
 primary_header['NROW'] = primary_header['NROW']*nfiles
 
@@ -87,7 +87,7 @@ for i, f in enumerate(files):
 
             hdul[ext].data[y0:y1, :] = data
 
-    if i % 50 == 0:
+    if i % 5 == 0:
         print(f"{i}/{nfiles}")
 
 hdul.flush()
