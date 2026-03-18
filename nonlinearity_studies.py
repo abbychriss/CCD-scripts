@@ -16,7 +16,7 @@ save_plots=True
 subplots=False
 
 hdu_list = fits.open(file_path+file)
-#for stitched fits files
+#unpack each extension separately
 ext_charge=[hdu_list[i].data.flatten() for i in range(1,5)]
 alphabet=['A','B','C','D']
 
