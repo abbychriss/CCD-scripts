@@ -12,10 +12,9 @@ from sklearn.cluster import k_means, AffinityPropagation, OPTICS
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import NearestNeighbors
 
-subplots=True
 plot_data_only=False
-plot_optics_only=False
-plot_all=True
+plot_cluster_algs=True
+plot_all=False
 
 file_name = "itp_img_CV_250x3500x500_bin1x1_125_20260317_130159_36.fz"
 path = "/Users/abbychriss/Desktop/Privitera_335/"
@@ -23,6 +22,7 @@ files=glob(path+'**/'+file_name,recursive=True)
 
 charge_thresh=60
 coord_range=[0,250,0,250] #[min_x, max_x, min_y, max_y]
+algorithms = []
 alphabet=['A','B','C','D']
 
 #--------------------GET DATA FROM FITS--------------------------------------
@@ -51,7 +51,7 @@ def create_mask(charge_thresh, charge, charge_weight=0):
 
     # Normalize and scale charge to have less weight
     # Use scikit standard scaler to scale all columns unit variance and remove the
-    # mean so that when we downweight charge, the scaling is statistically meaningful
+    # mean so that when we downweight charge, the scaling is applied consistently
     scaler = StandardScaler()
     charge_stacked_scaled = scaler.fit_transform(charge_stacked)
     charge_stacked_scaled[:, 2] *= charge_weight
@@ -61,7 +61,7 @@ def create_mask(charge_thresh, charge, charge_weight=0):
 
 #------ Find nearest neighbor for OPTICS DBSCAN
 def find_optimal_eps(data, k=10):
-    """Plot k-distance graph to find optimal eps for DBSCAN"""
+    #Plot k-distance graph to find optimal eps for DBSCAN
     neighbors = NearestNeighbors(n_neighbors=k)
     neighbors_fit = neighbors.fit(data)
     distances, indices = neighbors_fit.kneighbors(data)
@@ -82,20 +82,17 @@ def find_optimal_eps(data, k=10):
     return distances
 
 #------- OPTICS
-def get_optics_cluster(data,coord_range, coords,
-                       min_samples=10, metric='euclidean', cluster_method='xi', 
-                       eps=0.1, xi=0.05, min_cluster_size=5):
+def get_optics_cluster(data, min_samples=10, metric='euclidean',
+                       cluster_method='xi', 
+                       eps=0.1, xi=0.05, 
+                       min_cluster_size=5):
         
     optics_cluster = OPTICS(min_samples=min_samples, metric=metric, 
                             cluster_method=cluster_method, xi=xi,
                             min_cluster_size=min_cluster_size, eps=eps).fit(data)
     labels = optics_cluster.labels_
-
-    # Build a 2D image of cluster labels for the clustering region
-    cluster_image = np.full((coord_range[1]-coord_range[0], coord_range[3]-coord_range[2]), 0, dtype=int)
-    for idx, (x, y) in enumerate(coords):
-        cluster_image[x - coord_range[0], y - coord_range[2]] = labels[idx]
-    return cluster_image, labels
+    algorithms.append('OPTICS')
+    return labels
 
 #------ AffinityPropogation
 def get_affinity_cluster(data,damping=0.5,convergence_iter=15,max_iter=200,random_state=5):
@@ -106,13 +103,23 @@ def get_affinity_cluster(data,damping=0.5,convergence_iter=15,max_iter=200,rando
                                            random_state=random_state).fit(data)
     center_indices = affinity_cluster.cluster_centers_indices_
     labels = affinity_cluster.labels_
-
+    algorithms.append('Affinity Propogation')
     return center_indices, labels
 
 #------ k-means
-def get_kmeans_cluster(data,n_clusters=150,init='k-means++'):
-    center, label, sigma = k_means(data, n_clusters=n_clusters, init=init)
-    return center, label, sigma
+def get_kmeans_cluster(data,n_clusters=100,init='k-means++'):
+    centers, labels, sigmas = k_means(data, n_clusters=n_clusters, init=init)
+    algorithms.append('k-means')
+    return centers, labels, sigmas
+
+#------- Build cluster image from labels
+# Build a 2D pixel array with values given by cluster labels in the clustering region defined by coord_range
+def get_cluster_image(labels):
+    cluster_image = np.full((coord_range[1]-coord_range[0], coord_range[3]-coord_range[2]), 0, dtype=int)
+    for idx, (x, y) in enumerate(coords):
+        cluster_image[x - coord_range[0], y - coord_range[2]] = labels[idx]
+    return cluster_image
+
 
 #---- Remap cluster image so that first two indices can become the background and noise colors
     # Remap cluster_image values to colormap indices
@@ -128,8 +135,8 @@ def remap_image(cluster_image):
 #---------------------COLOR MAPS--------------------------------------
 
 #----------- Make discrete color map from n colors----------
-def make_discrete_cmap(n_clusters,display_colors=False):
-    # Anchor colors in RGB [0, 255] for easy comparison with color picker online
+def make_discrete_cmap(n,display_colors=False):
+    # Anchor colors in RGB [0, 255] for easy comparison with online color picker
     anchor_colors_255 = np.array([
         (100, 200, 70),    # teal-green
         (155, 66, 194),    # purple
@@ -148,20 +155,21 @@ def make_discrete_cmap(n_clusters,display_colors=False):
     cmap_cont = LinearSegmentedColormap.from_list("custom_1000", anchor_colors)
 
     # Resample to N discrete colors
-    colors = cmap_cont(np.linspace(0, 1, n_clusters))
+    colors = cmap_cont(np.linspace(0, 1, n))
 
     # Show colormap for debugging
     if display_colors:
         fig, ax = plt.subplots(1, 1, figsize=(6, 2))
-        ax.imshow(np.vstack((np.linspace(0, 10, n_clusters), np.linspace(0, 10, n_clusters))), cmap=ListedColormap(colors))
+        ax.imshow(np.vstack((np.linspace(0, 10, n), np.linspace(0, 10, n))), cmap=ListedColormap(colors))
         ax.set_axis_off()
         plt.show()
 
-    return ListedColormap(colors)
+    discrete_cmap = ListedColormap(colors)
+    return discrete_cmap
 
 #-------- Combine discrete color map with custom background and noise colors
-def add_bg_noise_cmap(cmap, base_colors=np.array([[.255, .255, .255, 0.25], [0., 0., 0., 1.]])):
-    cmap_n_colors = make_discrete_cmap(n_clusters)
+def get_full_bg_noise_cmap(n, base_colors=np.array([[.255, .255, .255, 0.25], [0., 0., 0., 1.]])):
+    cmap_n_colors = make_discrete_cmap(n)
     color_list = np.vstack((base_colors, cmap_n_colors.colors))
     cmap = colors.ListedColormap(color_list)
     return cmap
@@ -175,27 +183,36 @@ def plot_data(charge,coord_range):
     axd.set_ylabel("Pixel Y")
     axd.set_xlim(coord_range[0],coord_range[1])
     axd.set_ylim(coord_range[2],coord_range[3])
-    axd.set_title(f"DATA Pixel Charge >{charge_thresh} ADU, ext {ext}")
+    axd.set_title(f"Data Pixel Charge >{charge_thresh} ADU, ext {ext}")
     plt.show()
 
-def plot_clusters(cluster_img,cmap):
-    figc, axc = plt.subplots(1, 1, figsize=(10, 4), constrained_layout=True)
-    caxc = axc.imshow(cluster_img,
-                    cmap=cmap,
-                    vmin=0,
-                    vmax=n_clusters+2,
-                    interpolation='nearest')
-    axc.set_xlabel("Pixel X")
-    axc.set_ylabel("Pixel Y")
+def plot_clusters(images, cmaps, n_clusters, nrows, ncols, charge_thresh, ext, figsize=(8,4), tick_labels=False):
+    fig, axs = plt.subplots(nrows, ncols, figsize=figsize, constrained_layout=True)
+    for i, ax in enumerate(axs):
+        n=n_clusters[i]
+        cmap=cmaps[i]
+        cluster_img = images[i]
+        caxc = ax.imshow(cluster_img,
+                        cmap=cmap,
+                        vmin=0,
+                        vmax=n+2,
+                        interpolation='nearest')
+        ax.set_xlabel("Pixel X")
+        ax.set_ylabel("Pixel Y")
 
-    # Create colorbar with automatic labels
-    cbar = figc.colorbar(caxc, label="Cluster ID", orientation='horizontal', ax=axc)
-    tick_positions = np.arange(n_clusters+2)
-    tick_labels = ['bg', 'noise'] + [str(i) for i in range(1, n_clusters + 1)]
-    cbar.set_ticks(tick_positions)
-    cbar.set_ticklabels(tick_labels, fontsize=4)
-    figc.gca().invert_yaxis()
-    axc.set_title(f"OPTICS Clusters (charge>{charge_thresh} ADU), ext {ext}")
+        # Create colorbar with automatic labels
+        cbar = fig.colorbar(caxc, label="Cluster ID", orientation='horizontal', ax=ax)
+        if tick_labels:
+            tick_positions = np.arange(n+2)
+            tick_labels = ['bg', 'noise'] + [str(i) for i in range(1, n_clusters + 1)]
+            cbar.set_ticks(tick_positions)
+            cbar.set_ticklabels(tick_labels, fontsize=4)
+        else:
+            cbar.set_ticks([])
+        ax.invert_yaxis()
+        ax.set_title(f"{algorithms[i]}")
+    plt.suptitle(f'Clusters of charge > {charge_thresh} ADU, ext {ext}\n'
+                 +f"{algorithms[i]} found {n_clusters[i]}" for i in range(len(algorithms)))
     plt.show()
 
 def plot_data_clusters(charge,cluster_img,cmap,cluster_alg):
@@ -212,7 +229,7 @@ def plot_data_clusters(charge,cluster_img,cmap,cluster_alg):
     ax[0].set_ylabel("Pixel Y")
     ax[0].set_xlim(coord_range[0],coord_range[1])
     ax[0].set_ylim(coord_range[2],coord_range[3])
-    ax[0].set_title(f"DATA Pixel Charge >{charge_thresh} ADU, ext {ext}")
+    ax[0].set_title(f"Data Pixel Charge >{charge_thresh} ADU, ext {ext}")
 
     cax2 = ax[1].imshow(cluster_img,
                     cmap=cmap,
@@ -249,38 +266,58 @@ for i, file in enumerate(files):
 
         #find_optimal_eps(charge_stacked_scaled)
             
-        # Create clusters using selected algorithm
-        optics_cluster, labels = get_optics_cluster(charge_stacked_scaled,
-                                                    coord_range,
-                                                    coords,
+        # Generate clusters using optics algorithm
+        labels = []
+
+        optics_labels = get_optics_cluster(charge_stacked_scaled,
                                                     min_samples=10,
                                                     metric='euclidean',
                                                     cluster_method='xi',
-                                                    xi=0.12,
+                                                    xi=0.2,
                                                     min_cluster_size=5,
                                                     eps=0.01
                                                     )
+        labels.append(optics_labels)
+        
+        # Generate clusters using k-means algorithm
+        centers, kmeans_labels, sigmas = get_kmeans_cluster(charge_stacked_scaled,
+                                                     n_clusters=20
+                                                     )
+        labels.append(kmeans_labels)
 
-        # Remap image to make room for bg and noise labels
-        remapped_image = remap_image(optics_cluster)
+        affinity_centers, affinity_labels = get_affinity_cluster(charge_stacked_scaled,
+                                                      damping=0.97, #higher values = less clusters
+                                                      convergence_iter=15,
+                                                      max_iter=100,
+                                                      random_state=5)
+        labels.append(affinity_labels)
 
-        n_clusters = len(np.unique(labels[labels != -1]))
-        print(f"Nclusters, ext {ext}: {n_clusters}")
+        cluster_images = [get_cluster_image(label) for label in labels]
+        remapped_images = [remap_image(image) for image in cluster_images]
+
+        n_clusters = [len(np.unique(label[label != -1])) for label in labels]
+
+        print(f"EXT {ext}: " + ", ".join(f"{algorithms[i]} found {n_clusters[i]}" for i in range(len(algorithms))))
 
         # Create discrete colormap that includes background (white), noise (black), and cluster colors
-        discrete_cmap = make_discrete_cmap(n_clusters)
-        bg_noise_cluster_cmap = add_bg_noise_cmap(discrete_cmap)
+        cmaps = [get_full_bg_noise_cmap(n) for n in n_clusters]
 
-        # Plot optics clustering algorithm results
-        if plot_optics_only:
-            plot_clusters(remapped_image,
-                          bg_noise_cluster_cmap
+        # Compare clustering algorithm results
+        if plot_cluster_algs:
+            plot_clusters(remapped_images,
+                          cmaps,
+                          n_clusters,
+                          nrows=1,
+                          ncols=len(algorithms),
+                          figsize=(8,4),
+                          charge_thresh=charge_thresh,
+                          ext=ext
                           )
         
         # Plot data and clustering algorithms in same subplot to compare directly
         if plot_all:
             plot_data_clusters(charge,
-                               remapped_image,
-                               bg_noise_cluster_cmap,
+                               remapped_images,
+                               cmaps,
                                cluster_alg='OPTICS'
                                )

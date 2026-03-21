@@ -90,7 +90,6 @@ for i, f in enumerate(files):
     if i % 5 == 0:
         print(f"{i}/{nfiles}")
 
-hdul.flush()
 hdul.close()
 if len(glob.glob(outname))>0:
     print(f'successfully saved stitched file to {outname}')
