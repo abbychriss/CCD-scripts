@@ -5,6 +5,8 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 import math
 
+from .clustering import get_fits
+
 #plt.rcParams['text.usetex'] = True
 
 file = "avg_img_CV_250x3500x500_bin1x1_125_52_stitched.fits"
@@ -17,10 +19,9 @@ plot_nonlinearity=True
 save_plots=True
 subplots=False
 
-hdu_list = fits.open(file_path+file)
-#unpack each extension separately
-ext_charge=[hdu_list[i].data.flatten() for i in range(1,5)]
 alphabet=['A','B','C','D']
+
+ext_charge = get_fits(file)
 
 #fit a double gaussian to zero + 1 electron peak in each extension
 zero_one_peak_range=[[10,13],[11.5,14.5],[8,11.5],[8.5,11.5]]
@@ -31,6 +32,150 @@ def double_gauss(x, a, b, c, d, e, f):
 
 def parabola(x, a, b, c):
     return a*x**2 + b*x + c
+
+# Function finds noise and gain from input pixel charge data
+# zero_one_range is range of charge (in ADU) we want to restrict to for finding the zero and one electron peaks
+def calculate_noise_gain(data, zero_one_test_range=[8,15], n=200):
+
+    data = np.array(data).flatten()
+    data_test_range = data[(data > zero_one_test_range[0]) & (charge < zero_one_test_range[1])]
+
+    nbins=int(n*len(zero_one_test_range))
+    counts_test, edges_test = np.histogram(data_test_range,bins=nbins,range=(zero_one_test_range[0],zero_one_test_range[1]))
+
+    # Find index of maximum of counts, which corresponds to the mean ADU of the zero electron peak
+    zero_peak_index = np.where(counts_test == max(counts_test))
+    zero_one_nbins = np.linspace(zero_one_test_range[0], zero_one_test_range[1], nbins)
+    zero_peak_charge = zero_one_nbins[zero_peak_index]
+
+    # Restrict data range to only include the zero and one electron peaks
+    # Nominal gain is around 1.3 and noise less than 1 electron 
+    zero_one_left = zero_peak_charge - 1
+    zero_one_right = zero_peak_charge + 2.5
+    zero_one_range = [zero_one_left, zero_one_right]
+    data_window = data[(data > zero_one_left) & (charge < zero_one_right)]
+
+    # Fit double gaussian to range [zero_peak_charge - 1, zero_peak_charge + 2.5]
+    counts, edges = np.histogram(data_window,bins=nbins,range=zero_one_range)
+    xdata = np.linspace(zero_one_left, zero_one_right, nbins)
+    popt, pcov = curve_fit(double_gauss, xdata, counts, bounds=([0.02, zero_one_left, 0.005, zero_one_left+2,1e4,1e3], 
+                                                                  [0.5, zero_one_right, 0.05, zero_one_right,1e7,1e7]))
+    
+    # Extract gain, noise and rest of double gaussian coefficients from curve fit
+    gain=tuple(popt)[3]-tuple(popt)[1] # Gain is difference between mean of one and zero electron peaks
+    noise=tuple(popt)[0] # Noise is standard deviation of zero electron peak 
+
+    return gain, noise, popt, zero_one_range
+
+# Usage: for plotting zero-one electron peaks from each extension on same subplot. Input data is list of 2D pixel charge arrays from all 4 extensions.
+def plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], n=200, subplots=False, convert_to_electrons=False):
+    
+    fig, ax = plt.subplot(2, 2, figsize=(9,7), constrained_layout=True, convert_to_electrons=False)
+    for ext, data in enumerate(data_ext):
+        data = np.array(data).flatten()
+
+        gain, noise, popt, zero_one_range = calculate_noise_gain(data, zero_one_test_range, n)
+        coeff = tuple(popt)+(gain,)
+        data_window = data[(data > zero_one_range[0]) & (charge < zero_one_range[1])]
+        nbins=int(n*len(zero_one_range))
+        xdata = np.linspace(zero_one_range[0], zero_one_range[1], nbins)
+
+        ax[ext].hist(data_window,bins=nbins,range=tuple(zero_one_range))
+        ax[ext].set_xlabel('Charge (ADU)')
+        ax[ext].set_ylabel('N')
+        ax[ext].set_title(f'EXT {ext}')
+        
+        ax1[ext].plot(xdata, double_gauss(xdata, *popt), 'r',
+            label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4]
+            +'\n'+'$N_0$ = %5.3f, $N_1$ = %5.3f, gain = %5.3f ADU/$e^{–}$'%coeff[4:])
+        ax1[ext].legend(loc="upper right", fontsize=6)
+        ax1[ext].set_ylim(0,max(counts1)+2e5)
+        ax1[ext].set_xlim(tuple(zero_one_range))
+        ax1[ext].legend()
+    plt.show()
+
+    if convert_to_electrons:
+        fig, ax = plt.subplot(2, 2, figsize=(9,7), constrained_layout=True)
+        data_window = [(charge - coeff[1])/gain for charge in charge_window] # Subtract pedestal (mean ADU of zero electron peak) and divide by gain
+        zero_one_range = [(charge - coeff[1])/gain for charge in zero_one_range] 
+        counts, edges = np.histogram(data_window, bins=nbins, range=zero_one_range)
+        xdata = np.linspace(zero_one_range[0], zero_one_range[1], nbins)
+        popt, pcov = curve_fit(double_gauss, xdata, counts, bounds=([0.02, data_window[0], 0.005, data_window[0]+1.5,1e4,1e3], 
+                                                                [0.5, data_window[1], 0.05, data_window[1],1e7,1e7]))
+       
+        ax[ext].hist(data_window,bins=nbins,range=tuple(zero_one_range))
+        ax[ext].set_xlabel(r'Charge ($e^–$)')
+        ax[ext].set_ylabel('N')
+
+        ax[ext].set_title(f'EXT {ext}')
+        
+        ax[ext].plot(xdata, double_gauss(xdata, *popt), 'r',
+            label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4])
+        ax[ext].legend(loc="upper right", fontsize=6)
+        ax[ext].set_ylim(0,max(counts1)+2e5)
+        ax[ext].set_xlim(tuple(zero_one_range))
+        ax[ext].legend()
+    plt.show()
+
+def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplots=False, convert_to_electrons=False):
+
+    data = np.array(data).flatten()
+
+    gain, noise, popt, zero_one_range = calculate_noise_gain(data, zero_one_test_range, n)
+    coeff = tuple(popt)+(gain,)
+    data_window = data[(data > zero_one_range[0]) & (charge < zero_one_range[1])]
+    nbins=int(n*len(zero_one_range))
+    xdata = np.linspace(zero_one_range[0], zero_one_range[1], nbins)
+
+    plt.hist(data_window, bins=nbins, range=tuple(zero_one_range))
+    plt.xlabel('Charge (ADU)')
+    plt.ylabel('N')
+    plt.title(f'Combined Am-241 Pixel Charge Distribution, EXT {ext}')
+    
+    plt.plot(xdata, double_gauss(xdata, *popt), 'r',
+            label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4]+'\n'
+            +'$N_0$ = %5.3f, $N_1$ = %5.3f, gain = %5.3f ADU/$e^{–}$'%coeff[4:])
+    plt.legend(loc="upper right", fontsize=6)
+    plt.ylim(0,max(counts1)+2e5)
+    plt.xlim(tuple(zero_one_range))
+    plt.legend()
+    plt.show()
+
+    if convert_to_electrons:
+        data_window = [(charge - coeff[1])/gain for charge in charge_window] # Subtract pedestal (mean ADU of zero electron peak) and divide by gain
+        zero_one_range = [(charge - coeff[1])/gain for charge in zero_one_range] 
+        counts, edges = np.histogram(data_window, bins=nbins, range=zero_one_range)
+        xdata = np.linspace(zero_one_range[0], zero_one_range[1], nbins)
+        popt, pcov = curve_fit(double_gauss, xdata, counts, bounds=([0.02, data_window[0], 0.005, data_window[0]+1.5,1e4,1e3], 
+                                                                [0.5, data_window[1], 0.05, data_window[1],1e7,1e7]))
+       
+        plt.hist(data_window,bins=nbins,range=tuple(zero_one_range))
+        plt.xlabel(r'Charge ($e^–$)')
+        plt.ylabel('N')
+
+        plt.title(f'Combined Am-241 Pixel Charge Distribution, EXT {ext}')
+        
+        plt.plot(xdata, double_gauss(xdata, *popt), 'r',
+            label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4])
+        plt.legend(loc="upper right", fontsize=6)
+        plt.ylim(0,max(counts1)+2e5)
+        plt.xlim(tuple(zero_one_range))
+        plt.legend()
+        plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #open two different subplots outside of loop to be filled
 if plot_zero_one_peaks and subplots:
