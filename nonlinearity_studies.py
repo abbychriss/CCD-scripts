@@ -164,19 +164,6 @@ def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplo
         plt.show()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 #open two different subplots outside of loop to be filled
 if plot_zero_one_peaks and subplots:
     fig1, ax1 = plt.subplots(2,2,figsize=(11,8),constrained_layout=True)
@@ -193,9 +180,9 @@ if plot_nonlinearity and subplots:
     fig3.suptitle('Nonlinearity of Pixel Charge Fit')
     ax3=ax3.flatten()
 
-for ext,charge in enumerate(ext_charge):
+for ext, charge in enumerate(ext_charge):
 
-    #-----------------PLOT 1: CALCULATE NOISE AND GAIN-------------------------------------------
+    #----------------- PLOT 1: CALCULATE NOISE AND GAIN -------------------------------------------
     nbins=int(n*len(zero_one_peak_range[ext]))
     charge = np.array(charge).flatten()
     charge_window = charge[(charge > zero_one_peak_range[ext][0]) & (charge < zero_one_peak_range[ext][1])]
@@ -336,7 +323,6 @@ for ext,charge in enumerate(ext_charge):
 
 if save_plots:
     if subplots:
-        #fig3.savefig(fig_path+file[:-5]+'noise_fit.pdf')
         if plot_zero_one_peaks:
             fig1.savefig(fig_path+file[:-5]+'_noise_fit.jpeg',dpi=350)
         if plot_nonlinearity:
