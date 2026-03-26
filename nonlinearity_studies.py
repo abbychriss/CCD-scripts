@@ -19,13 +19,7 @@ plot_nonlinearity=True
 save_plots=True
 subplots=False
 
-alphabet=['A','B','C','D']
-
-ext_charge = get_fits(file)
-
-#fit a double gaussian to zero + 1 electron peak in each extension
-zero_one_peak_range=[[10,13],[11.5,14.5],[8,11.5],[8.5,11.5]]
-n=200
+#--------------------- 
 
 def double_gauss(x, a, b, c, d, e, f):
     return (e/(np.sqrt(a*2*np.pi))) * np.exp(-(x-b)**2/(2*a)) + (f/(np.sqrt(c*2*np.pi))) * np.exp(-(x-d)**2/(2*c))
@@ -110,12 +104,12 @@ def plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], n=200, su
         ax[ext].set_title(f'EXT {ext}')
         
         ax[ext].plot(xdata, double_gauss(xdata, *popt), 'r',
-            label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4])
+            label=r'$\sigma_0$ = %5.3f $e^{–}$, $\mu_0$ = %5.3f $e^{–}$, $\sigma_1$ = %5.3f $e^{–}$, $\mu_1$ = %5.3f $e^{–}$'%coeff[0:4])
         ax[ext].legend(loc="upper right", fontsize=6)
         ax[ext].set_ylim(0,max(counts1)+2e5)
         ax[ext].set_xlim(tuple(zero_one_range))
         ax[ext].legend()
-    plt.show()
+        plt.show()
 
 def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplots=False, convert_to_electrons=False):
 
@@ -165,17 +159,13 @@ def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplo
 
 
 
+alphabet=['A','B','C','D']
 
+ext_charge = get_fits(file)
 
-
-
-
-
-
-
-
-
-
+#fit a double gaussian to zero + 1 electron peak in each extension
+zero_one_peak_range=[[10,13],[11.5,14.5],[8,11.5],[8.5,11.5]]
+n=200
 
 #open two different subplots outside of loop to be filled
 if plot_zero_one_peaks and subplots:
@@ -243,7 +233,7 @@ for ext,charge in enumerate(ext_charge):
     #use peakfinder to plot all charge in each extension with labels on each peak
     hist_range = (coeff[1]-3*coeff[0]-1, 2500) #left end of range should be on the left side of the zero electron peak 
                                                     #--> was fitting negative (cross talk) peaks before!
-    print(hist_range)
+
     widths=[0.9,0.8,1,1]
     distances=[-2,-1,-1,-2]
     bin_factor=8

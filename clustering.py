@@ -529,6 +529,6 @@ for i, file in enumerate(files):
                                figsize=(11,7),
                                nrows_cluster=2,#1
                                ncols_cluster = 2,#len(algorithms)
-                               save_plot=True,
+                               save_plot=False,
                                figname='/Users/abbychriss/Desktop/Privitera_335/plots/'+'_'.join(file.split('/')[-1].split('_')[i] for i in range(len(file.split('/')[-1].split('_'))-1))
                                )
