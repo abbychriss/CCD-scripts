@@ -419,14 +419,14 @@ for i, file in enumerate(files):
         coords, charge_stacked_scaled = create_mask(charge_thresh,
                                                     charge,
                                                     charge_weight=0.01)
-
-        #find_optimal_eps(charge_stacked_scaled)
-            
         labels = []
         algorithms = []
 
-        # Generate clusters using optics algorithm
+        # Generate clusters using specified algorithm
+
         if do_optics:
+            #optionally, can find the optimal epsilon manually
+            #find_optimal_eps(charge_stacked_scaled)
             optics_labels = get_optics_cluster(charge_stacked_scaled,
                                                algorithms,
                                                min_samples=10,
@@ -437,7 +437,6 @@ for i, file in enumerate(files):
                                                eps=0.01)
             labels.append(optics_labels)
         
-        # Generate clusters using k-means algorithm
         if do_kmeans:
             centers, kmeans_labels, sigmas = get_kmeans_cluster(charge_stacked_scaled,
                                                                 algorithms,
@@ -529,6 +528,7 @@ for i, file in enumerate(files):
                                figsize=(11,7),
                                nrows_cluster=2,#1
                                ncols_cluster = 2,#len(algorithms)
-                               save_plot=False,
-                               figname='/Users/abbychriss/Desktop/Privitera_335/plots/'+'_'.join(file.split('/')[-1].split('_')[i] for i in range(len(file.split('/')[-1].split('_'))-1))
+                               save_plot=True,
+                               figname='/Users/abbychriss/Desktop/Privitera_335/plots/'+'_'.join(file.split('/')[-1].split('_')[i] \
+                                                                                                 for i in range(len(file.split('/')[-1].split('_'))-1))
                                )
