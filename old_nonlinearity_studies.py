@@ -17,7 +17,16 @@ plot_nonlinearity=True
 save_plots=True
 subplots=False
 
-ext_charge = get_fits(file)
+def double_gauss(x, a, b, c, d, e, f):
+    return (e/(np.sqrt(a*2*np.pi))) * np.exp(-(x-b)**2/(2*a)) + (f/(np.sqrt(c*2*np.pi))) * np.exp(-(x-d)**2/(2*c))
+
+def parabola(x, a, b, c):
+    return a*x**2 + b*x + c
+
+n=200
+alphabet=['A','B','C','D']
+
+ext_charge = get_fits(file_path+file)
 
 #open two different subplots outside of loop to be filled
 if plot_zero_one_peaks and subplots:
