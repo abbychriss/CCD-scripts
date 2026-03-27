@@ -9,21 +9,17 @@ from .clustering import get_fits
 
 #plt.rcParams['text.usetex'] = True
 
-file = "avg_img_CV_250x3500x500_bin1x1_125_52_stitched.fits"
-file_path = "/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/combined-fits/"
-fig_path = "/Users/abbychriss/Desktop/Privitera_335/"
-plot_zero_one_peaks=True
-plot_all_peaks=True
-plot_vert_lines=False
-plot_nonlinearity=True
-save_plots=True
-subplots=False
 
 #---------------- ANALYSIS FUNCTIONS ----------------------------
 
+#---------------- (0) Convert to electrons ----------------------
+def convert_to_electrons(data, pedestal, gain, flatten=True):
+    if flatten:
+        data = np.array(data).flatten()
+    data_electrons = [(q - pedestal)/gain for q in data]  # Subtract pedestal (mean ADU of zero electron peak) and divide by gain
+    return data_electrons
 
 #---------------- (1) Calculate noise/gain ----------------------
-
 # Function finds noise and gain from input pixel charge data
 # zero_one_range is range of charge (in ADU) we want to restrict to for finding the zero and one electron peaks
 def calculate_noise_gain(data, zero_one_test_range=[8,15], n=200):
@@ -52,58 +48,62 @@ def calculate_noise_gain(data, zero_one_test_range=[8,15], n=200):
     popt, pcov = curve_fit(double_gauss, xdata, counts, bounds=([0.02, zero_one_left, 0.005, zero_one_left+2,1e4,1e3], 
                                                                   [0.5, zero_one_right, 0.05, zero_one_right,1e7,1e7]))
     
-    # Extract gain, noise and rest of double gaussian coefficients from curve fit
-    gain=tuple(popt)[3]-tuple(popt)[1] # Gain is difference between mean of one and zero electron peaks
+    # Extract pedestal, noise, gain, and rest of double gaussian coefficients from curve fit
+    pedestal=tuple(popt)[1] # Pedestal is mean of zero electron peak
     noise=tuple(popt)[0] # Noise is standard deviation of zero electron peak 
+    gain=tuple(popt)[3]-tuple(popt)[1] # Gain is difference between mean of one and zero electron peaks
 
-    return gain, noise, popt, zero_one_range
+    return pedestal, noise, gain, popt, zero_one_range
 
 
 #---------------- (2) Find peaks ----------------------------
-
-def find_peaks(data, ext, popt, range_left='left_of_zero', range_right=2500, bin_factor=8,
-               widths=[0.9,0.8,1,1], distances=[-2,-1,-1,-2]):
+# Input is charge data (in ADU or electrons) from one extension
+def find_peaks(data, width, buffer=1, 
+               convert_to_electrons=True,
+               range_left='left_of_zero', 
+               range_right=2500, 
+               bin_factor=8):
     
+    pedestal, noise, gain, popt, zero_one_range = calculate_noise_gain(data)
+    
+    if convert_to_electrons:
+        data = convert_to_electrons(data, pedestal, gain, flatten=True)
+
     if range_left=='left_of_zero':
-        range_left=popt[1]-3*popt[0]-1 #make left end of range at the left side of the zero electron peak 
+        range_left=pedestal-3*noise - 1 #make left end of range at the left side of the zero electron peak 
 
     hist_range = (range_left, range_right)
 
-    widths=widths
-    distances=distances
-    bin_factor=bin_factor
-    counts2, edges2 = np.histogram(charge,bins=math.floor((hist_range[1]-hist_range[0])*bin_factor),range=hist_range)
-    centers = 0.5 * (edges2[1:] + edges2[:-1])
-    peaks, properties = find_peaks(counts2, height=0,width=widths[ext],distance=bin_factor+distances[ext])
+    counts, edges = np.histogram(data, bins=math.floor((hist_range[1]-hist_range[0])*bin_factor),range=hist_range)
+    centers = 0.5 * (edges[1:] + edges[:-1])
+    peaks, properties = find_peaks(counts, height=0, width=width, distance=bin_factor-buffer)
 
-    return peaks, centers, properties, hist_range
+    return counts, peaks, centers, properties, hist_range
 
 
 #---------------- (3) Fit nonlinearity ----------------------------
-
-def fit_nonlinearity(centers, coeff, fit_range=[600,1500,1000,600]):
-    #convert to electrons: subtract the pedestal (mean of zero electron peak) from all charge values, 
-    #then divide by the gain (difference between zero and 1 electron peak)
-    peak_charge_e = np.array([(centers[p]-coeff[1])/gain for p in peaks])
+def fit_nonlinearity(centers, pedestal, fit_range, fit_bounds_low=-100, fit_bounds_high=100):
+    # Convert to electrons: subtract the pedestal (mean of zero electron peak) from all charge values, 
+    # Then divide by the gain (difference between zero and 1 electron peak)
+    peak_charge_e = np.array([(centers[p]-pedestal)/gain for p in peaks])
     charge_minus_npeak = [(peak_charge_e[i] - i) for i in range(len(peaks))]
-    fit_range=[600,1500,1000,600]
-    popt, pcov = curve_fit(parabola, peak_charge_e[:fit_range[ext]], charge_minus_npeak[:fit_range[ext]],
-                           bounds=([-100,-100,-100], [100,100,100]))
-    return popt, pcov
+    parabola_coeff, pcov = curve_fit(parabola, peak_charge_e[:fit_range], charge_minus_npeak[:fit_range],
+                           bounds=(fit_bounds_low, fit_bounds_high))
+    return parabola_coeff, peak_charge_e, charge_minus_npeak
 
 
 #---------------- PLOTTING FUNCTIONS ----------------------------
 
 #---------------- Plot zero-one peaks subplot -----------------------
-
 # Usage: for plotting zero-one electron peaks from each extension on same subplot. Input data is list of 2D pixel charge arrays from all 4 extensions.
-def plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], n=200, subplots=False, convert_to_electrons=False):
+def plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], 
+                                 n=200, subplots=False, convert_to_electrons=False):
     
-    fig, ax = plt.subplot(2, 2, figsize=(9,7), constrained_layout=True, convert_to_electrons=False)
+    fig, ax = plt.subplot(2, 2, figsize=(9,7), constrained_layout=True)
     for ext, data in enumerate(data_ext):
         data = np.array(data).flatten()
 
-        gain, noise, popt, zero_one_range = calculate_noise_gain(data, zero_one_test_range, n)
+        pedestal, noise, gain, popt, zero_one_range = calculate_noise_gain(data, zero_one_test_range, n)
         coeff = tuple(popt)+(gain,)
         data_window = data[(data > zero_one_range[0]) & (charge < zero_one_range[1])]
         nbins=int(n*len(zero_one_range))
@@ -125,8 +125,8 @@ def plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], n=200, su
 
     if convert_to_electrons:
         fig, ax = plt.subplot(2, 2, figsize=(9,7), constrained_layout=True)
-        data_window = [(charge - coeff[1])/gain for charge in charge_window] # Subtract pedestal (mean ADU of zero electron peak) and divide by gain
-        zero_one_range = [(charge - coeff[1])/gain for charge in zero_one_range] 
+        data_window = convert_to_electrons(charge_window, coeff[1], gain)
+        zero_one_range = convert_to_electrons(zero_one_range, coeff[1], gain) 
         counts, edges = np.histogram(data_window, bins=nbins, range=zero_one_range)
         xdata = np.linspace(zero_one_range[0], zero_one_range[1], nbins)
         popt, pcov = curve_fit(double_gauss, xdata, counts, bounds=([0.02, data_window[0], 0.005, data_window[0]+1.5,1e4,1e3], 
@@ -147,13 +147,12 @@ def plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], n=200, su
         plt.show()
 
 
-#---------------- Plot zero-one peaks per extension ----------------------------
-
-def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplots=False, convert_to_electrons=False):
+#---------------- Plot zero-one peaks by extension ----------------------------
+def plot_zero_one_peaks_individual(data, ext, zero_one_test_range=[8,15], n=200, convert_to_electrons=False):
 
     data = np.array(data).flatten()
 
-    gain, noise, popt, zero_one_range = calculate_noise_gain(data, zero_one_test_range, n)
+    pedestal, noise, gain, popt, zero_one_range = calculate_noise_gain(data, zero_one_test_range, n)
     coeff = tuple(popt)+(gain,)
     data_window = data[(data > zero_one_range[0]) & (charge < zero_one_range[1])]
     nbins=int(n*len(zero_one_range))
@@ -174,8 +173,8 @@ def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplo
     plt.show()
 
     if convert_to_electrons:
-        data_window = [(charge - coeff[1])/gain for charge in charge_window] # Subtract pedestal (mean ADU of zero electron peak) and divide by gain
-        zero_one_range = [(charge - coeff[1])/gain for charge in zero_one_range] 
+        data_window = convert_to_electrons(charge_window, coeff[1], gain)
+        zero_one_range = convert_to_electrons(zero_one_range, coeff[1], gain)
         counts, edges = np.histogram(data_window, bins=nbins, range=zero_one_range)
         xdata = np.linspace(zero_one_range[0], zero_one_range[1], nbins)
         popt, pcov = curve_fit(double_gauss, xdata, counts, bounds=([0.02, data_window[0], 0.005, data_window[0]+1.5,1e4,1e3], 
@@ -197,66 +196,186 @@ def plot_zero_one_peaks_ext(data, ext, zero_one_test_range=[8,15], n=200, subplo
 
 
 #---------------- Plot all electron peaks ----------------------------
+# Input is list of data from each of four extensions
+def plot_all_peaks(data_ext, 
+                   widths, buffers, convert_to_electrons, range_left, range_right, bin_factor,
+                   fig_path, file, dpi=350,
+                   plot_individual=True, plot_together=False, 
+                   draw_lines=True, linecolor='r', linestyle='--',
+                   subplots_figsize=(9,7), individual_figsize=(6,5),
+                   xlim=hist_range, ylim=(0,4e5),
+                   bins=math.floor(hist_range[1]-hist_range[0])*20,
+                   suptitle='Peaks in Pixel Charge Distribution'):
 
-def plot_all_peaks(peaks, centers, hist_range, subplots=True, draw_lines=True):
+    fig_name=fig_path+file[:-5]+'_peak_finder'
 
-    if plot_all_peaks:
-        if subplots:
-            ax2[ext].hist(charge, bins=math.floor(hist_range[1]-hist_range[0])*20, range=hist_range)
-            ax2[ext].set_yscale('log')
-            ax2[ext].set_xlim((hist_range[0],20))
-            ax2[ext].set_title(f'CCD {alphabet[ext]}')
-        else:
-            plt.hist(charge, bins=math.floor(hist_range[1]-hist_range[0])*20, range=hist_range)
-            plt.xlabel(r'Charge (ADU)')
-            plt.ylabel('N')
-            plt.yscale('log')
-            plt.xlim((hist_range[0],20))
-            plt.title(f'Peaks in Pixel Charge Distribution, CCD {alphabet[ext]}')
+    if plot_individual:
+        for ext, data in enumerate(data_ext):
+            width=widths[ext]
+            buffer=buffers[ext]
+            # Get pedestal, noise, gain, etc. from individual extension data
+            counts, peaks, centers, properties, hist_range = find_peaks(data, width=width, buffer=buffer, 
+                                                                        convert_to_electrons=convert_to_electrons,
+                                                                        range_left=range_left, 
+                                                                        range_right=range_right, 
+                                                                        bin_factor=bin_factor)
+            
+            fig, ax = plt.subplots(1, 1, figsize=individual_figsize, constrained_layout=True)
+            fig.suptitle(suptitle+f': EXT {ext}')
+            ax.hist(charge, bins=bins, range=hist_range)
+            ax.set_xlabel(r'Charge ($e^-$)')
+            ax.set_ylabel('N')
+            ax.set_yscale('log')
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
 
-        # draw vertical lines and labels at each peak
-        if draw_lines:
-            for i,p in enumerate(peaks):
-                peak_x = centers[p]
-                peak_y = counts2[p]
+            # draw vertical lines and labels at each peak
+            if draw_lines:
+                for i,p in enumerate(peaks):
+                    peak_x = centers[p]
+                    peak_y = counts[p]
 
-                if subplots:
-                    ax2[ext].axvline(peak_x, linestyle='--', color='r')
-                    ax2[ext].text(
-                        peak_x,
+                    ax.axvline(peak_x, linestyle=linestyle, color=linecolor)
+                    ax.text(peak_x,
                         peak_y,
                         f"{i}",
                         verticalalignment='bottom',
                         horizontalalignment='center',
-                        color='red',
-                        fontsize=10
-                    )
-                    ax2[ext].set_xlabel(r'Charge ($e^-$)')
-                    ax2[ext].set_ylabel('N')
-                    ax2[ext].set_ylim(0,1000)
-                else:
-                    plt.axvline(peak_x, linestyle='--', color='r')
-                    plt.text(
-                        peak_x,
-                        peak_y,
-                        f"{i}",
-                        verticalalignment='bottom',
-                        horizontalalignment='center',
-                        color='red',
-                        fontsize=10
-                    )
-        if not subplots:
+                        color=linecolor,
+                        fontsize=10)
+                    
+            if save_plots:
+                plt.savefig(fig_name+f'_EXT{ext}.jpeg',dpi=dpi)
             plt.show()
 
-#---------------- Plot nonlinearity ----------------------------
+    if plot_together:
+        fig, axs = plt.subplots(2,2,figsize=subplots_figsize,constrained_layout=True)
+        axs=axs.flatten()
+        fig.suptitle(suptitle)
 
-def plot_nonlinearity():
+        for ext, data in enumerate(data_ext):
+            width=widths[ext]
+            buffer=buffers[ext]
+            # Get pedestal, noise, gain, etc. from individual extension data
+            counts, peaks, centers, properties, hist_range = find_peaks(data, width=width, buffer=buffer, 
+                                                                        convert_to_electrons=convert_to_electrons,
+                                                                        range_left=range_left, 
+                                                                        range_right=range_right, 
+                                                                        bin_factor=bin_factor)
+            ax = axs[ext]
+            ax.hist(charge, bins=bins, range=hist_range)
+            ax.set_yscale('log')
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            ax.set_title(f'EXT {ext}')
+
+            # draw vertical lines and labels at each peak
+            if draw_lines:
+                for i,p in enumerate(peaks):
+                    peak_x = centers[p]
+                    peak_y = counts[p]
+
+                    ax.axvline(peak_x, linestyle=linestyle, color=linecolor)
+                    ax.text(peak_x,
+                        peak_y,
+                        f"{i}",
+                        verticalalignment='bottom',
+                        horizontalalignment='center',
+                        color=linecolor,
+                        fontsize=10)
+        
+        if save_plots:
+            plt.savefig(fig_name+'.jpeg',dpi=dpi)
+        plt.show()
+
+
+#---------------- Plot nonlinearity ----------------------------
+def plot_nonlinearity(data_ext,
+                    fit_range_left, fit_range_right,
+                    fig_path, file, 
+                    widths=[0.9,0.8,1,1], 
+                    buffers=[2,1,1,2], 
+                    bin_factor=8,
+                    subplots_figsize=(9,7), individual_figsize=(6,5), 
+                    suptitle='Pixel Charge Nonlinearity Curve',
+                    xlim=(-100, hist_range[1]-400), 
+                    ylim=(min(charge_minus_npeak)-10, max(charge_minus_npeak)+15),
+                    line_color='r', scatter_color='b', s=2, alpha=0.5,
+                    plot_individual=False, plot_together=True, save_plots=False, dpi=350):
+
+    fig_name=fig_path+file[:-5]+'_nonlinearity'
+
+    if plot_individual:
+        for ext, data in enumerate(data_ext):
+            fig, ax = plt.subplots(1, 1, figsize=individual_figsize, constrained_layout=True)
+            axs=axs.flatten()
+            fig.suptitle(suptitle+f': EXT {ext}')
+            
+            pedestal, noise, gain, double_gauss_coeff, zero_one_range = calculate_noise_gain(data)
+
+            width=widths[ext]
+            buffer=buffers[ext]
+            counts, peaks, centers, properties, hist_range = find_peaks(data, width=width, buffer=buffer, 
+                                                                        convert_to_electrons=True,
+                                                                        range_left=fit_range_left, 
+                                                                        range_right=fit_range_right, 
+                                                                        bin_factor=bin_factor)
+            
+            parabola_coeff, peak_charge_e, charge_minus_npeak = fit_nonlinearity(centers, pedestal, fit_range=(range))
+
+            ax.plot(peak_charge_e, parabola(peak_charge_e, *parabola_coeff), color=line_color,
+                        label=r'$%5.6f x^2 + %5.3f x + %5.3f$' %tuple(parabola_coeff))
+            ax.scatter(peak_charge_e, charge_minus_npeak, c=scatter_color, s=s, alpha=alpha)
+            ax.legend(loc="upper right", fontsize=8)
+            ax.set_xlabel(r'Measured Pixel Charge ($e^-$)')
+            ax.set_ylabel(r'Measured Pixel Charge - Peak n. ($e^-$) ')
+            ax.set_ylim(ylim)
+            ax.set_xlim(xlim)
+            ax.grid()
+            if save_plots:
+                plt.savefig(fig_name+f'_EXT{ext}.jpeg',dpi=dpi)
+            plt.show()
+            
+    if plot_together:
+        fig, axs = plt.subplots(2, 2, figsize=subplots_figsize, constrained_layout=True)
+        axs=axs.flatten()
+        fig.suptitle(suptitle)
+        for ext, data in enumerate(data_ext):
+            ax = axs[ext]
+            fig, ax = plt.subplots(1, 1, figsize=individual_figsize, constrained_layout=True)
+            axs=axs.flatten()
+            fig.suptitle(suptitle+f': EXT {ext}')
+            
+            pedestal, noise, gain, double_gauss_coeff, zero_one_range = calculate_noise_gain(data)
+
+            width=widths[ext]
+            buffer=buffers[ext]
+            counts, peaks, centers, properties, hist_range = find_peaks(data, width=width, buffer=buffer, 
+                                                                        convert_to_electrons=True,
+                                                                        range_left=fit_range_left, 
+                                                                        range_right=fit_range_right, 
+                                                                        bin_factor=bin_factor)
+            
+            parabola_coeff, peak_charge_e, charge_minus_npeak = fit_nonlinearity(centers, pedestal, fit_range=(range))
+
+            ax.plot(peak_charge_e, parabola(peak_charge_e, *parabola_coeff), color=line_color,
+                        label=r'$%5.6f x^2 + %5.3f x + %5.3f$' %tuple(parabola_coeff))
+            ax.scatter(peak_charge_e, charge_minus_npeak, c=scatter_color, s=s, alpha=alpha)
+            ax.legend(loc="upper right", fontsize=8)
+            ax.set_xlabel(r'Measured Pixel Charge ($e^-$)')
+            ax.set_ylabel(r'Measured Pixel Charge - Peak n. ($e^-$) ')
+            ax.set_ylim(ylim)
+            ax.set_xlim(xlim)
+            ax.grid()
+
+            if save_plots:
+                plt.savefig(fig_name+'.jpeg',dpi=dpi)
+            plt.show()
 
 
 #---------------- UTILITY FUNCTIONS ----------------------------
 
 #---------------- Curves ----------------------------
-
 def double_gauss(x, a, b, c, d, e, f):
     return (e/(np.sqrt(a*2*np.pi))) * np.exp(-(x-b)**2/(2*a)) + (f/(np.sqrt(c*2*np.pi))) * np.exp(-(x-d)**2/(2*c))
 
@@ -264,178 +383,78 @@ def parabola(x, a, b, c):
     return a*x**2 + b*x + c
 
 
+#------------------ RUN ANALYSIS AND MAKE PLOTS ------------------------------
 
-alphabet=['A','B','C','D']
+file = "avg_img_CV_250x3500x500_bin1x1_125_52_stitched.fits"
+file_path = "/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/combined-fits/"
+fig_path = "/Users/abbychriss/Desktop/Privitera_335/plots/"
+plot_zero_one_peaks=True
+plot_all_peaks=True
+plot_nonlinearity=True
 
-ext_charge = get_fits(file)
+widths=[0.9,0.8,1,1]
+buffers=[2,1,1,2]
+bin_factor=8
+find_peaks_range_right=2000
+nonlinearity_fit_range=[600,1500,1000,600]
+
+# Get data from fits file
+data_ext = get_fits(file)
+
+hist_ranges = []
+peak_charges_e = []
+charge_minus_npeaks = []
+for ext, data in enumerate(data_ext):
+    width = widths[ext]
+    buffer = buffers[ext]
+
+    pedestal, noise, gain, popt, zero_one_range = calculate_noise_gain(data)
+    hist_range = (pedestal-3*noise-1, find_peaks_range_right)
+    hist_ranges.append(hist_range)
+
+    counts, peaks, centers, properties, hist_range = find_peaks(data, width=width, buffer=buffer, 
+               convert_to_electrons=True,
+               range_left='left_of_zero', 
+               range_right=find_peaks_range_right, 
+               bin_factor=bin_factor)
+
+    fit_range=nonlinearity_fit_range[ext]
+    parabola_coeff, peak_charge_e, charge_minus_npeak = fit_nonlinearity(centers, 
+                                                                         pedestal, 
+                                                                         fit_range, 
+                                                                         fit_bounds_low=-100, 
+                                                                         fit_bounds_high=100):
+    peak_charges_e.append(peak_charge_e)
+    charge_minus_npeaks.append(charge_minus_npeak)
+
 
 #fit a double gaussian to zero + 1 electron peak in each extension
-zero_one_peak_range=[[10,13],[11.5,14.5],[8,11.5],[8.5,11.5]]
-n=200
-
-#open two different subplots outside of loop to be filled
-if plot_zero_one_peaks and subplots:
-    fig1, ax1 = plt.subplots(2,2,figsize=(11,8),constrained_layout=True)
-    ax1=ax1.flatten()
-    fig1.suptitle('Combined Am-241 Pixel Charge Distribution')
-
-if plot_all_peaks and subplots:
-    fig2, ax2 = plt.subplots(2,2,figsize=(9,7),constrained_layout=True)
-    fig2.suptitle('Peaks in Pixel Charge Distribution')
-    ax2=ax2.flatten()
-
-if plot_nonlinearity and subplots:
-    fig3, ax3 = plt.subplots(2,2,figsize=(9,7),constrained_layout=True)
-    fig3.suptitle('Nonlinearity of Pixel Charge Fit')
-    ax3=ax3.flatten()
-
-for ext, charge in enumerate(ext_charge):
-
-    #----------------- PLOT 1: CALCULATE NOISE AND GAIN -------------------------------------------
-    nbins=int(n*len(zero_one_peak_range[ext]))
-    charge = np.array(charge).flatten()
-    charge_window = charge[(charge > zero_one_peak_range[ext][0]) & (charge < zero_one_peak_range[ext][1])]
-    counts1, edges1 = np.histogram(charge_window,bins=nbins,range=(zero_one_peak_range[ext][0],zero_one_peak_range[ext][1]))
-    xdata = np.linspace(zero_one_peak_range[ext][0],zero_one_peak_range[ext][1],nbins)
-    popt, pcov = curve_fit(double_gauss, xdata, counts1, bounds=([0.02, zero_one_peak_range[ext][0], 0.005, zero_one_peak_range[ext][0]+2,1e4,1e3], 
-                                                                  [0.5, zero_one_peak_range[ext][1], 0.05, zero_one_peak_range[ext][1],1e7,1e7]))
-    gain=tuple(popt)[3]-tuple(popt)[1]
-    print(f'Gain for CCD {alphabet[ext]} = {gain}')
-    coeff = tuple(popt)+(gain,)
-
-    if plot_zero_one_peaks:
-
-        if subplots:
-            ax1[ext].hist(charge_window,bins=nbins,range=tuple(zero_one_peak_range[ext]))
-            ax1[ext].set_xlabel('Charge (ADU)')
-            ax1[ext].set_ylabel('N')
-            ax1[ext].set_title(f'CCD {alphabet[ext]}')
-            
-            
-            ax1[ext].plot(xdata, double_gauss(xdata, *popt), 'r',
-                    label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4]
-                    +'\n'+'$N_0$ = %5.3f, $N_1$ = %5.3f, gain = %5.3f ADU/$e^{–}$'%coeff[4:])
-            ax1[ext].legend(loc="upper right", fontsize=6)
-            ax1[ext].set_ylim(0,max(counts1)+2e5)
-            ax1[ext].set_xlim(tuple(zero_one_peak_range[ext]))
-            ax1[ext].legend()
-        else:
-            plt.hist(charge_window,bins=nbins,range=tuple(zero_one_peak_range[ext]))
-            plt.xlabel('Charge (ADU)')
-            plt.ylabel('N')
-            plt.title(f'Combined Am-241 Pixel Charge Distribution, CCD {alphabet[ext]}')
-            
-            plt.plot(xdata, double_gauss(xdata, *popt), 'r',
-                    label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%coeff[0:4]+'\n'
-                    +'$N_0$ = %5.3f, $N_1$ = %5.3f, gain = %5.3f ADU/$e^{–}$'%coeff[4:])
-            plt.legend(loc="upper right", fontsize=6)
-            plt.ylim(0,max(counts1)+2e5)
-            plt.xlim(tuple(zero_one_peak_range[ext]))
-            plt.legend()
-            plt.show()
-
-    #-----------------PLOT 2: PEAKFINDER-------------------------------------------
-
-    #use peakfinder to plot all charge in each extension with labels on each peak
-    hist_range = (coeff[1]-3*coeff[0]-1, 2500) #left end of range should be on the left side of the zero electron peak 
-                                                    #--> was fitting negative (cross talk) peaks before!
-
-    widths=[0.9,0.8,1,1]
-    distances=[-2,-1,-1,-2]
-    bin_factor=8
-    counts2, edges2 = np.histogram(charge,bins=math.floor((hist_range[1]-hist_range[0])*bin_factor),range=hist_range)
-    centers = 0.5 * (edges2[1:] + edges2[:-1])
-    peaks, properties = find_peaks(counts2, height=0,width=widths[ext],distance=bin_factor+distances[ext])
-
-    if plot_all_peaks:
-        if subplots:
-            ax2[ext].hist(charge, bins=math.floor(hist_range[1]-hist_range[0])*20, range=hist_range)
-            ax2[ext].set_yscale('log')
-            ax2[ext].set_xlim((hist_range[0],20))
-            ax2[ext].set_title(f'CCD {alphabet[ext]}')
-        else:
-            plt.hist(charge, bins=math.floor(hist_range[1]-hist_range[0])*20, range=hist_range)
-            plt.xlabel(r'Charge (ADU)')
-            plt.ylabel('N')
-            plt.yscale('log')
-            plt.xlim((hist_range[0],20))
-            plt.title(f'Peaks in Pixel Charge Distribution, CCD {alphabet[ext]}')
-
-        # draw vertical lines and labels at each peak
-        if plot_vert_lines:
-            for i,p in enumerate(peaks):
-                peak_x = centers[p]
-                peak_y = counts2[p]
-
-                if subplots:
-                    ax2[ext].axvline(peak_x, linestyle='--', color='r')
-                    ax2[ext].text(
-                        peak_x,
-                        peak_y,
-                        f"{i}",
-                        verticalalignment='bottom',
-                        horizontalalignment='center',
-                        color='red',
-                        fontsize=10
-                    )
-                    ax2[ext].set_xlabel(r'Charge ($e^-$)')
-                    ax2[ext].set_ylabel('N')
-                    ax2[ext].set_ylim(0,1000)
-                else:
-                    plt.axvline(peak_x, linestyle='--', color='r')
-                    plt.text(
-                        peak_x,
-                        peak_y,
-                        f"{i}",
-                        verticalalignment='bottom',
-                        horizontalalignment='center',
-                        color='red',
-                        fontsize=10
-                    )
-        if not subplots:
-            plt.show()
+if plot_zero_one_peaks:
+    plot_zero_one_peaks_subplots(data_ext, zero_one_test_range=[8,15], 
+                                    n=200, subplots=False, convert_to_electrons=False)
     
+    for ext, data in enumerate(data):
+        plot_zero_one_peaks_individual(data, ext, zero_one_test_range=[8,15], n=200, convert_to_electrons=False)
 
-    #-----------------PLOT 3: NONLINEARITY FIT-------------------------------------------
-    #convert to electrons: subtract the pedestal (mean of zero electron peak) from all charge values, 
-    #then divide by the gain (difference between zero and 1 electron peak)
-    peak_charge_e = np.array([(centers[p]-coeff[1])/gain for p in peaks])
-    charge_minus_npeak = [(peak_charge_e[i] - i) for i in range(len(peaks))]
-    fit_range=[600,1500,1000,600]
-    popt, pcov = curve_fit(parabola, peak_charge_e[:fit_range[ext]], charge_minus_npeak[:fit_range[ext]],
-                           bounds=([-100,-100,-100], [100,100,100]))
-    if plot_nonlinearity:
-        if subplots:
-            ax3[ext].plot(peak_charge_e, parabola(peak_charge_e, *popt), color='r',
-                        label=r'$%5.6f x^2 + %5.3f x + %5.3f$' %tuple(popt))
-            ax3[ext].scatter(peak_charge_e,charge_minus_npeak, c='blue',s=2,alpha=0.5)
-            ax3[ext].legend(loc="upper right", fontsize=8)
-            ax3[ext].set_xlabel(r'Measured Pixel Charge ($e^-$)')
-            ax3[ext].set_ylabel(r'Measured Pixel Charge ($e^-$) - Peak n.')
-            ax3[ext].set_ylim(min(charge_minus_npeak)-10,max(charge_minus_npeak)+15)
-            ax3[ext].set_xlim(-100,hist_range[1]-400)
-            ax3[ext].grid()
-            ax3[ext].set_title(f'CCD {alphabet[ext]}')
-        
-        else:
-            plt.plot(peak_charge_e, parabola(peak_charge_e, *popt), color='r',
-                        label=r'$%5.6f x^2 + %5.3f x + %5.3f$' %tuple(popt))
-            plt.scatter(peak_charge_e,charge_minus_npeak, c='blue',s=2,alpha=0.5)
-            plt.legend(loc="upper right", fontsize=8)
-            plt.xlabel(r'Measured Pixel Charge ($e^-$)')
-            plt.ylabel(r'Measured Pixel Charge ($e^-$) - Peak n.')
-            plt.title(f'Nonlinearity of Pixel Charge Fit, CCD {alphabet[ext]}')
-            plt.ylim(min(charge_minus_npeak)-5,max(charge_minus_npeak)+15)
-            plt.xlim(-100,hist_range[1]-400)
-            plt.grid()
-            plt.show()
+plot_all_peaks(data_ext, 
+                   widths, buffers, convert_to_electrons, range_left=0, range_right=1000, bin_factor=bin_factor,
+                   fig_path=fig_path, file=file, dpi=350,
+                   plot_individual=True, plot_together=False, 
+                   draw_lines=True, linecolor='r', linestyle='--',
+                   subplots_figsize=(9,7), individual_figsize=(6,5),
+                   xlim=(range_left, range_right), ylim=(0,4e5),
+                   bins=math.floor(range_right-range_left)*20,
+                   suptitle='Peaks in Pixel Charge Distribution')
 
-if save_plots:
-    if subplots:
-        if plot_zero_one_peaks:
-            fig1.savefig(fig_path+file[:-5]+'_noise_fit.jpeg',dpi=350)
-        if plot_nonlinearity:
-            fig3.savefig(fig_path+file[:-5]+'_nonlinearity.jpeg',dpi=350)
-
-if subplots:
-    plt.show()
+plot_nonlinearity(data_ext,
+                  fit_range_left=0, fit_range_right=2000,
+                    fig_path=fig_path, file=file, 
+                    widths=widths, 
+                    buffers=buffers, 
+                    bin_factor=bin_factor,
+                    subplots_figsize=(9,7), individual_figsize=(6,5), 
+                    suptitle='Pixel Charge Nonlinearity Curve',
+                    xlim=(-100, hist_range[1]-400), 
+                    ylim=(min(charge_minus_npeak)-10, max(charge_minus_npeak)+15),
+                    line_color='r', scatter_color='b', s=2, alpha=0.5,
+                    plot_individual=False, plot_together=True, save_plots=False, dpi=350)
