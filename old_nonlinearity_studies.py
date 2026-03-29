@@ -106,11 +106,12 @@ for ext,charge in enumerate(ext_charge):
         if subplots:
             ax2[ext].hist(charge, bins=(hist_range[1]-hist_range[0])*20, range=hist_range)
             ax2[ext].set_title(f'CCD {alphabet[ext]}')
+            ax2[ext].set_ylim(0,1000)
         else:
             plt.hist(charge, bins=(hist_range[1]-hist_range[0])*20, range=hist_range)
             plt.xlabel(r'Charge ($e^-$)')
             plt.ylabel('N')
-            plt.ylim(0,50)
+            plt.ylim(0,1000)
             plt.xlim(hist_range)
             plt.title(f'Peaks in Pixel Charge Distribution, CCD {alphabet[ext]}')
 
@@ -133,7 +134,6 @@ for ext,charge in enumerate(ext_charge):
                 )
                 ax2[ext].set_xlabel(r'Charge ($e^-$)')
                 ax2[ext].set_ylabel('N')
-                ax2[ext].set_ylim(0,1000)
             else:
                 plt.axvline(peak_x, linestyle='--', color='r')
                 plt.text(
