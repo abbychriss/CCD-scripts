@@ -7,8 +7,6 @@ import math
 
 from glob import glob
 
-#plt.rcParams['text.usetex'] = True
-
 #---------------- ANALYSIS FUNCTIONS ----------------------------
 
 #---------------- (0) Convert to electrons ----------------------
@@ -59,6 +57,8 @@ def calculate_noise_gain(data, zero_one_test_range=[8,15], n=200, fit_bounds='de
 
 
 #---------------- (2) Find peaks ----------------------------
+# Finds all electron peaks in flattened pixel charge array per extension
+# First converts data from ADU to electrons (if not already in electrons)
 # Input is charge data (in ADU or electrons) from one extension
 # bins is the number of bins given for initial charge histogram
 # bin_factor is the multiple of the length of range used in fitting all peaks (number of bins per peak essentially)
@@ -67,22 +67,23 @@ def calculate_noise_gain(data, zero_one_test_range=[8,15], n=200, fit_bounds='de
 def find_electron_peaks(data, 
                         width, 
                         buffer, 
+                        pedestal,
+                        noise,
+                        gain,
                         bins='default',
                         flatten=True,
                         do_convert_to_electrons=True,
-                        range_left=0, 
+                        range_left='left_of_zero', 
                         range_right=2500, 
                         bin_factor=8):
     
     if flatten:
         data=np.array(data).flatten()
-
-    #zero_one_counts, zero_one_edges, pedestal, noise, gain, popt, zero_one_range = calculate_noise_gain(data)
     
-    """if do_convert_to_electrons:
-        data = convert_to_electrons(data, pedestal, gain, flatten=True)"""
+    if do_convert_to_electrons:
+        data = convert_to_electrons(data, pedestal, gain, flatten=False)
 
-    """if range_left=='left_of_zero':
+    if range_left=='left_of_zero':
         range_left=pedestal-3*noise - 1 #make left end of range at the left side of the zero electron peak """
 
     hist_range = (range_left, range_right)
@@ -98,14 +99,44 @@ def find_electron_peaks(data,
 
 
 #---------------- (3) Fit nonlinearity ----------------------------
-def fit_nonlinearity(peaks, centers, pedestal, gain, fit_range_right, fit_bounds_low=-100, fit_bounds_high=100):
-    # Convert to electrons: subtract the pedestal (mean of zero electron peak) from all charge values, 
+def fit_nonlinearity(peaks, centers, pedestal, gain, fit_range_right, do_convert_to_electrons=False, fit_bounds_low=-100, fit_bounds_high=100):
+    # If specified, convert to electrons: subtract the pedestal (mean of zero electron peak) from all charge values, 
     # Then divide by the gain (difference between zero and 1 electron peak)
-    peak_charge_e = np.array([(centers[p]-pedestal)/gain for p in peaks])
+    if do_convert_to_electrons:
+        peak_charge_e = np.array([(centers[p]-pedestal)/gain for p in peaks])
+    # If peaks were given in electrons, do not convert to electrons. Just pick out electron values of peak locations.
+    else:
+        peak_charge_e = np.array([centers[p] for p in peaks])
     charge_minus_npeak = [(peak_charge_e[i] - i) for i in range(len(peaks))]
-    parabola_coeff, pcov = curve_fit(parabola, peak_charge_e[:fit_range_right], charge_minus_npeak[:fit_range_right],
+    parabola_coeff, parabola_pcov = curve_fit(parabola, peak_charge_e[:fit_range_right], charge_minus_npeak[:fit_range_right],
                            maxfev=2000, bounds=(fit_bounds_low, fit_bounds_high))
-    return parabola_coeff, peak_charge_e, charge_minus_npeak
+    return parabola_coeff, parabola_pcov, peak_charge_e, charge_minus_npeak
+
+#---------------- (4) Get nonlinearity at charge value ----------------------------
+# use coefficients of parabola fit to nonlinearity curve from fit_nonlinearity to estimate the nonlinearity
+# at a single value or list of values
+# required arguments: q (charge value that parabola equation is evaluated at, can be int, float or list), parabola_coeff (the curve_fit optimal parabola coefficients found in fit_nonlinearity)
+# optional arguments: parabola_pcov, fit_range_right (used to ascertain how confident we should be in the nonlinearity value); print_values (if you want to print what the function outputs)
+def get_nonlinearity_at(q, parabola_coeff, parabola_pcov=None, fit_range_right=None, print_values=True):
+    a = parabola_coeff[0]
+    b = parabola_coeff[1]
+    c = parabola_coeff[2]
+
+    if type(q)==float or type(q)==int:
+        nonlinearity_at_q = a*q**2 + b*q + c
+    
+    if type(q)==list:
+        nonlinearity_at_q = [(a*q_i**2 + b*q_i + c) for q_i in q]
+    
+    if print_values==True:
+        print(f'Interpolated nonlinearity at {q} e- = {nonlinearity_at_q}')
+
+        if fit_range_right!=None:
+            print(f'Parabola fit was performed up to {fit_range_right} e-')
+        if parabola_pcov!=None:
+            print(f'Covariance of fit = {parabola_pcov}')
+
+    return nonlinearity_at_q
 
 #---------------- PLOTTING FUNCTIONS ----------------------------
 
@@ -165,7 +196,7 @@ def plot_zero_one_peaks(data_ext,
                 ax.set_yscale('log')
             elif yscale!='linear':
                 ax.set_yscale(yscale)
-            ax.bar(zero_one_edges[:-1], zero_one_counts, edgecolor='none', align='edge', width=np.diff(zero_one_edges))
+            ax.bar(zero_one_edges[:-1], zero_one_counts, edgecolor='none', linewidth=0, align='edge', width=np.diff(zero_one_edges))
 
             ax.set_xlabel('Charge (ADU)')
             ax.set_ylabel('N')
@@ -219,7 +250,7 @@ def plot_zero_one_peaks(data_ext,
                 elif yscale!='linear':
                     ax.set_yscale(yscale)
 
-                ax.bar(zero_one_edges_e[:-1], zero_one_counts_e, align='edge', edgecolor='none', width=np.diff(zero_one_edges_e))
+                ax.bar(zero_one_edges_e[:-1], zero_one_counts_e, align='edge', edgecolor='none', linewidth=0, width=np.diff(zero_one_edges_e))
                 ax.set_xlabel(r'Charge ($e^–$)')
                 ax.set_ylabel('N')
                 ax.set_yscale(yscale)
@@ -267,7 +298,7 @@ def plot_zero_one_peaks(data_ext,
             elif yscale!='linear':
                     ax.set_yscale(yscale)
 
-            ax.bar(zero_one_centers, zero_one_counts, align='center', edgecolor='none', width=bin_width)
+            ax.bar(zero_one_centers, zero_one_counts, align='center', edgecolor='none', linewidth=0, width=bin_width)
             
             ax.plot(zero_one_centers, double_gauss(zero_one_centers, *double_gauss_popt), 'r',
                 label=r'$\sigma_0$ = %5.3f, $\mu_0$ = %5.3f, $\sigma_1$ = %5.3f, $\mu_1$ = %5.3f,'%double_gauss_coeff[0:4]
@@ -320,7 +351,7 @@ def plot_zero_one_peaks(data_ext,
                 elif yscale!='linear':
                     ax.set_yscale(yscale)
 
-                ax.bar(zero_one_centers_e, zero_one_counts_e, align='center', edgecolor='none', width=bin_width_e)
+                ax.bar(zero_one_centers_e, zero_one_counts_e, align='center', edgecolor='none', linewidth=0, width=bin_width_e)
 
                 ax.set_title(f'EXT {ext}')
                 ax.plot(zero_one_centers_e, double_gauss(zero_one_centers_e, *double_gauss_popt_e), 'r',
@@ -374,7 +405,7 @@ def plot_all_peaks(counts_ext,
             
             fig, ax = plt.subplots(1, 1, figsize=individual_figsize, constrained_layout=True)
             fig.suptitle(suptitle+f': EXT {ext}')
-            ax.bar(centers, counts, align='center', edgecolor='none', width=bin_width)
+            ax.bar(centers, counts, align='center', edgecolor='none', linewidth=0, width=bin_width)
             ax.set_xlabel(r'Charge ($e^-$)')
             ax.set_ylabel('N')
             if yscale!='linear':
@@ -407,14 +438,13 @@ def plot_all_peaks(counts_ext,
         axs=axs.flatten()
         fig.suptitle(suptitle)
 
-        for ext, data in enumerate(data_ext):
-            counts=counts_ext[ext]
+        for ext, counts in enumerate(counts_ext):
             peaks=peaks_ext[ext]
             centers=centers_ext[ext]
             bin_width = centers[1] - centers[0]
             ax = axs[ext]
 
-            ax.bar(centers, counts, align='center', edgecolor='none', width=bin_width)
+            ax.bar(centers, counts, align='center', edgecolor='none', linewidth=0, width=bin_width)
             ax.set_xlabel(r'Charge ($e^-$)')
             ax.set_ylabel('N')
             if yscale!='linear':
@@ -561,20 +591,25 @@ def get_zero_one_peaks_ext(data_ext, fit_bounds='default'):
     return zero_one_counts_ext, zero_one_edges_ext, pedestals, gains, double_gauss_popts, zero_one_ranges
         
 
-def get_all_peaks_ext(data_ext, widths, buffers, bins='default', flatten=True, do_convert_to_electrons=True, range_left='left_of_zero', range_right=2000, bin_factor=8):
+def get_all_peaks_ext(data_ext, widths, buffers, pedestals, double_gauss_popts, gains, bins='default', flatten=True, do_convert_to_electrons=True, range_left='left_of_zero', range_right=2000, bin_factor=8):
     counts_ext = []
     edges_ext = []
     peaks_ext = []
     centers_ext = []
     hist_ranges = []
     for ext, data in enumerate(data_ext):
-        data=np.array(data).flatten()
         width = widths[ext]
         buffer = buffers[ext]
+        pedestal = pedestals[ext]
+        noise = double_gauss_popts[ext][0]
+        gain = gains[ext]
 
         counts, edges, peaks, centers, properties, hist_range = find_electron_peaks(data, 
                                                                                     width, 
                                                                                     buffer, 
+                                                                                    pedestal,
+                                                                                    noise,
+                                                                                    gain,
                                                                                     bins=bins,
                                                                                     flatten=flatten,
                                                                                     do_convert_to_electrons=do_convert_to_electrons,
@@ -590,32 +625,48 @@ def get_all_peaks_ext(data_ext, widths, buffers, bins='default', flatten=True, d
 
     return counts_ext, edges_ext, peaks_ext, centers_ext, hist_ranges
 
-
-def get_nonlinearity_ext(data_ext, peaks_ext, centers_ext, pedestals, gains, fit_range_right_ext, fit_bounds_low=-100, fit_bounds_high=100):
+def get_nonlinearity_ext(peaks_ext, centers_ext, pedestals, gains, fit_range_right_ext, do_convert_to_electrons=False, fit_bounds_low=-100, fit_bounds_high=100, print_values=True):
+    
     peak_charge_e_ext = []
     charge_minus_npeak_ext = []
     parabola_coeffs = []
-    for ext, data in enumerate(data_ext):
-        data=np.array(data).flatten()
+    parabola_pcovs = []
 
-        peaks=peaks_ext[ext]
+    for ext, peaks in enumerate(peaks_ext):
+
         centers=centers_ext[ext]
         pedestal=pedestals[ext]
         gain=gains[ext]
         fit_range_right=fit_range_right_ext[ext]
 
-        parabola_coeff, peak_charge_e, charge_minus_npeak = fit_nonlinearity(peaks,
+        parabola_coeff, parabola_pcov, peak_charge_e, charge_minus_npeak = fit_nonlinearity(peaks,
                                                                              centers,
                                                                              pedestal, 
                                                                              gain, 
+                                                                             do_convert_to_electrons,
                                                                              fit_range_right, 
                                                                              fit_bounds_low, 
                                                                              fit_bounds_high)
+        
+        nonlinearity_at_500 = get_nonlinearity_at(500, parabola_coeff, parabola_pcov, fit_range_right, print_values)
+
         peak_charge_e_ext.append(peak_charge_e)
         charge_minus_npeak_ext.append(charge_minus_npeak)
         parabola_coeffs.append(parabola_coeff)
+        parabola_pcovs.append(parabola_pcov)
 
-    return peak_charge_e_ext, charge_minus_npeak_ext, parabola_coeffs
+    return peak_charge_e_ext, charge_minus_npeak_ext, parabola_coeffs, parabola_pcovs, nonlinearity_at_500
+
+def get_nonlinearity_at_ext(q, parabola_coeffs, parabola_pcovs, fit_range_right_ext, print_values=True):
+    
+    nonlinearity_at_q_ext = []
+    for ext, parabola_coeff in enumerate(parabola_coeffs):
+        parabola_pcov = parabola_pcovs[ext]
+        fit_range_right = fit_range_right_ext[ext]
+        nonlinearity_at_q = get_nonlinearity_at(q, parabola_coeff, parabola_pcov, fit_range_right, print_values=print_values)
+        nonlinearity_at_q_ext.append(nonlinearity_at_q)
+
+    return nonlinearity_at_q_ext
 
 #---------------- Curves ----------------------------
 def double_gauss(x, s0, m0, s1, m1, N0, N1):
@@ -623,112 +674,3 @@ def double_gauss(x, s0, m0, s1, m1, N0, N1):
 
 def parabola(x, a, b, c):
     return a*x**2 + b*x + c
-
-
-#------------------ RUN ANALYSIS AND MAKE PLOTS ------------------------------
-
-image_name = "avg_img_CV_250x3500x500_bin1x1_125_52_stitched.fits"
-file_path = "/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/combined-fits/"
-fig_path = "/Users/abbychriss/Desktop/Privitera_335/plots/"
-
-do_plot_zero_one_peaks=True
-do_plot_all_peaks=True
-do_plot_nonlinearity=True
-
-# Get data from fits file
-data_ext = get_fits(image_name)
-
-# Fit zeroth and first electron peaks to double gaussians
-zero_one_counts_ext, zero_one_edges_ext, pedestals, gains, \
-double_gauss_popts, zero_one_ranges = get_zero_one_peaks_ext(data_ext, 
-                                                            fit_bounds='default')
-
-# Apply scipy peak finder to find location of every electron peak
-counts_ext, edges_ext, peaks_ext, centers_ext, hist_ranges = get_all_peaks_ext(data_ext, 
-                                                                               widths=[0.9,0.8,1,1], 
-                                                                               buffers=[2,1,1,2], 
-                                                                               bins='default',
-                                                                               flatten=True,
-                                                                               do_convert_to_electrons=True, 
-                                                                               range_left=0, 
-                                                                               range_right=2500, 
-                                                                               bin_factor=8)
-
-# Fit parabola to nonlinearity curve
-nonlinearity_fit_ranges=[600,1500,1000,600]
-peak_charge_e_ext, charge_minus_npeak_ext, parabola_coeffs = get_nonlinearity_ext(data_ext, 
-                                                                                  peaks_ext,
-                                                                                  centers_ext, 
-                                                                                  pedestals, 
-                                                                                  gains, 
-                                                                                  nonlinearity_fit_ranges, 
-                                                                                  fit_bounds_low=-100, 
-                                                                                  fit_bounds_high=100)
-
-#fit a double gaussian to zero + 1 electron peak in each extension
-if do_plot_zero_one_peaks:
-    plot_zero_one_peaks(data_ext, 
-                        zero_one_counts_ext,
-                        zero_one_edges_ext, 
-                        pedestals, 
-                        gains, 
-                        double_gauss_popts, 
-                        zero_one_ranges,
-                        individual_figsize=(6,5), 
-                        subplots_figsize=(9,7),
-                        xlim='default',
-                        #ylim=(0.00001,2e5),
-                        yscale='linear',
-                        fontsize=8,
-                        n=200, 
-                        do_convert_to_electrons=True,
-                        plot_individual=False,
-                        plot_together=True,
-                        save_plots=False,
-                        fig_path=fig_path, 
-                        file=image_name, 
-                        dpi=350)
-
-if do_plot_all_peaks:
-    plot_all_peaks_range_left=np.min(np.array(hist_ranges).flatten())
-    plot_all_peaks_range_right=np.max(np.array(hist_ranges).flatten())
-
-    plot_all_peaks(counts_ext, 
-                   peaks_ext, 
-                   centers_ext,  
-                   xlim=(plot_all_peaks_range_left, plot_all_peaks_range_right),
-                   ylim='none', 
-                   yscale='linear',
-                   plot_individual=False, 
-                   plot_together=True, 
-                   draw_lines=True, 
-                   linecolor='r', 
-                   linestyle='--',
-                   individual_figsize=(7,6), 
-                   subplots_figsize=(9,7),
-                   suptitle='Peaks in Pixel Charge Distribution',
-                   save_plots=False,
-                   fig_path=fig_path,
-                   file=image_name, 
-                   dpi=350,)
-
-if do_plot_nonlinearity:
-    plot_nonlinearity(peaks_ext,
-                      parabola_coeffs, 
-                      peak_charge_e_ext, 
-                      charge_minus_npeak_ext,
-                      xlim='default', 
-                      ylim='default',
-                      individual_figsize=(6,5), 
-                      subplots_figsize=(9,7),
-                      suptitle='Pixel Charge Nonlinearity Curve',
-                      line_color='r', 
-                      scatter_color='b', 
-                      s=2, 
-                      alpha=0.5,
-                      plot_individual=False, 
-                      plot_together=True, 
-                      save_plots=False, 
-                      fig_path=fig_path, 
-                      file=image_name, 
-                      dpi=350)
