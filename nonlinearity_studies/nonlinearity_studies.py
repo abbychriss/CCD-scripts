@@ -6,6 +6,7 @@ from scipy.signal import find_peaks as scipy_find_peaks
 import math
 
 from glob import glob
+import os
 
 #---------------- ANALYSIS FUNCTIONS ----------------------------
 
@@ -99,6 +100,8 @@ def find_all_peaks(data,
     counts, edges = np.histogram(data, bins=bins,range=hist_range)
     centers = 0.5 * (edges[1:] + edges[:-1])
     peaks, properties = scipy_find_peaks(counts, height=0, width=width, distance=bin_factor-buffer)
+
+    print(f'Width = {width}, buffer = {buffer}, bin factor = {bin_factor} used for peak finder')
 
     return counts, edges, peaks, centers, properties, hist_range
 
@@ -225,6 +228,7 @@ def plot_zero_one_peaks(data_ext,
 
             if save_plots:
                 plt.savefig(fig_name+f'_EXT{ext}.jpeg',dpi=dpi)
+                print(f'Saved plots to {fig_name}_EXT{ext}.jpeg')
             plt.show()
 
         if do_convert_to_electrons:
@@ -278,6 +282,7 @@ def plot_zero_one_peaks(data_ext,
 
                 if save_plots:
                     plt.savefig(fig_name+f'_electrons_EXT{ext}.jpeg',dpi=dpi)
+                    print(f'Saved plot to {fig_name}_electrons_EXT{ext}.jpeg')
                 plt.show()
 
     if plot_together:
@@ -329,6 +334,7 @@ def plot_zero_one_peaks(data_ext,
                 ax.set_ylim(ylim)
         if save_plots:
             plt.savefig(fig_name+'.jpeg',dpi=dpi)
+            print(f'Saved plot to {fig_name}.jpeg')
         plt.show()
 
         if do_convert_to_electrons:
@@ -383,7 +389,8 @@ def plot_zero_one_peaks(data_ext,
                     ax.set_ylim(ylim)
 
             if save_plots:
-                plt.savefig(fig_name+f'_electrons.jpeg',dpi=dpi)
+                plt.savefig(fig_name+'_electrons.jpeg',dpi=dpi)
+                print(f'Saved plot to {fig_name}_electrons.jpeg')
             plt.show()
 
 
@@ -443,6 +450,7 @@ def plot_all_peaks(counts_ext,
                     
             if save_plots:
                 plt.savefig(fig_name+f'_EXT{ext}.jpeg',dpi=dpi)
+                print(f'Saved plot to {fig_name}_EXT{ext}.jpeg')
             plt.show()
 
     if plot_together:
@@ -483,6 +491,7 @@ def plot_all_peaks(counts_ext,
         
         if save_plots:
             plt.savefig(fig_name+'.jpeg',dpi=dpi)
+            print(f'Saved plot to {fig_name}.jpeg')
         plt.show()
 
 
@@ -538,6 +547,7 @@ def plot_nonlinearity(peaks_ext,
 
             if save_plots:
                 plt.savefig(fig_name+f'_EXT{ext}.jpeg',dpi=dpi)
+                print(f'Saved plot to {fig_name}_EXT{ext}.jpeg')
             plt.show()
             
     if plot_together:
@@ -572,17 +582,65 @@ def plot_nonlinearity(peaks_ext,
 
     if save_plots:
         plt.savefig(fig_name+'.jpeg',dpi=dpi)
+        print(f'Saved plot to {fig_name}.jpeg')
     plt.show()
 
 
 #---------------- UTILITY FUNCTIONS ----------------------------
 
 #---------------- Get Fits ----------------------------
-def get_fits(file_name, path="/Users/abbychriss/Desktop/Privitera_335/"):
+"""def get_fits(file_name, path="/Users/abbychriss/Desktop/Privitera_335/"):
     file=glob(path+'**/'+file_name,recursive=True)[0]
     hdu_list = fits.open(file)
     ext_charge=[hdu_list[i].data for i in range(1,5)]
+    return ext_charge"""
+
+def get_fits(file_input):
+    """
+    Load FITS extensions from a file.
+
+    Parameters
+    ----------
+    file_input : str
+        Can be:
+        - Absolute path to a FITS file
+        - Filename (searched recursively under project_root/data)
+        - Relative path inside project_root/data
+
+    Returns
+    -------
+    ext_charge : list
+        List of data arrays from extensions 1–4
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Case 1: absolute path
+    if os.path.isabs(file_input):
+        file_path = file_input
+
+    else:
+        data_root = os.path.join(project_root, "data")
+
+        # Case 2: relative path inside data/
+        candidate_path = os.path.join(data_root, file_input)
+        if os.path.exists(candidate_path):
+            file_path = candidate_path
+        else:
+            # Case 3: just a filename → search recursively
+            matches = glob(os.path.join(data_root, "**", file_input), recursive=True)
+
+            if len(matches) == 0:
+                raise FileNotFoundError(f"No file found matching '{file_input}' in {data_root}")
+            elif len(matches) > 1:
+                print(f"Warning: multiple matches found. Using first:\n{matches[0]}")
+
+            file_path = matches[0]
+
+    # Load FITS file
+    with fits.open(file_path) as hdu_list:
+        ext_charge = [hdu_list[i].data for i in range(1, 5)]
+
     return ext_charge
+
 
 #---------------- Return data for each extensions in a list from pixel charge data for all extensions
 def get_zero_one_peaks_ext(data_ext, fit_bounds='default'):

@@ -31,42 +31,41 @@ def main(args):
     """
     file_string = args.file_string
 
-    if not os.path.isabs(file_string):
-        file_string = os.path.join(project_root, file_string)
+    if not args.stitch_fits:
+        if not os.path.isabs(file_string):
+            file_string = os.path.join(project_root, file_string)
 
     do_stitch_images = args.stitch_fits
     do_plot_zero_one_peaks = args.plot_zero_one_peaks
     do_plot_all_peaks = args.plot_all_peaks
     do_get_nonlinearity_at = args.get_nonlinearity_at
     do_plot_nonlinearity = args.plot_nonlinearity
+    save_plots = args.save_plots
 
     if do_stitch_images:
         # Stitch images together by extension
         data_path = '/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/'
-        img_type='avg'
-        image = file_string #f'{img_type}_img_CV_250x3500x500_bin1x1_125*'
+        stitch_fits_image_string = file_string #f'{img_type}_img_CV_250x3500x500_bin1x1_125*'
 
-        image_name = stitch_fits(data_path, directory='03*/', image=image, out_path='combined-fits/', print_header=False)
-        #print(image_name)
-
+        image_name = stitch_fits(data_path, directory='', image=stitch_fits_image_string, out_path='combined-fits/', print_header=False)
+        image_name = image_name.split('/')[-1]
     else:
         image_name = file_string.split('/')[-1] #"avg_img_CV_250x3500x500_bin1x1_125_52_stitched.fits"
         file_path = '/'.join(s for s in file_string.split('/')[:-1]) #"/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/combined-fits/"
 
-    fig_path = "/Users/abbychriss/Desktop/Privitera_335/plots/"
-
+    fig_path = "/Users/abbychriss/Desktop/Privitera_335/plots/nonlinearity_studies/"
+    print(f'Analyzing image: {image_name}')
     # Get data from fits file
     data_ext = get_fits(image_name)
 
     # Fit zeroth and first electron peaks to double gaussians
     zero_one_counts_ext, zero_one_edges_ext, pedestals, gains, \
-    double_gauss_popts, zero_one_ranges = get_zero_one_peaks_ext(data_ext, 
-                                                                fit_bounds='default')
+    double_gauss_popts, zero_one_ranges = get_zero_one_peaks_ext(data_ext, fit_bounds='default')
 
     # Apply scipy peak finder to find location of every electron peak
     counts_ext, edges_ext, peaks_ext, centers_ext, hist_ranges = get_all_peaks_ext(data_ext, 
-                                                                                widths=[0.5,0.5,0.5,0.5], 
-                                                                                buffers=[2,2,2,2], 
+                                                                                widths=[0.3,0.3,0.6,0.3], 
+                                                                                buffers=[2.1,2.1,2.1,2.1], 
                                                                                 pedestals=pedestals, 
                                                                                 double_gauss_popts=double_gauss_popts,
                                                                                 gains=gains,
@@ -75,10 +74,10 @@ def main(args):
                                                                                 do_convert_to_electrons=True, 
                                                                                 range_left='default', 
                                                                                 range_right=2500, 
-                                                                                bin_factor=12)
+                                                                                bin_factor=8)
 
     # Fit parabola to nonlinearity curve
-    fit_range_right_ext=[600,600,600,600]
+    fit_range_right_ext= [600,800,500,1000]
 
     peak_charge_e_ext, charge_minus_npeak_ext, parabola_coeffs, parabola_pcovs, nonlinearity_at_500 = get_nonlinearity_ext(peaks_ext,
                                                                                                                            centers_ext, 
@@ -113,7 +112,7 @@ def main(args):
                             do_convert_to_electrons=True,
                             plot_individual=False,
                             plot_together=True,
-                            save_plots=False,
+                            save_plots=save_plots,
                             fig_path=fig_path, 
                             file=image_name, 
                             dpi=350)
@@ -136,7 +135,7 @@ def main(args):
                     individual_figsize=(7,6), 
                     subplots_figsize=(9,7),
                     suptitle='Peaks in Pixel Charge Distribution',
-                    save_plots=False,
+                    save_plots=save_plots,
                     fig_path=fig_path,
                     file=image_name, 
                     dpi=350,)
@@ -151,14 +150,14 @@ def main(args):
                         ylim='default',
                         individual_figsize=(6,5), 
                         subplots_figsize=(9,7),
-                        suptitle='Pixel Charge Nonlinearity Curve',
+                        suptitle='Pixel Charge Nonlinearity Curve (Nimages = 10)',
                         line_color='r', 
                         scatter_color='b', 
                         s=2, 
                         alpha=0.5,
                         plot_individual=False, 
                         plot_together=True, 
-                        save_plots=False, 
+                        save_plots=save_plots, 
                         fig_path=fig_path, 
                         file=image_name, 
                         dpi=350)
@@ -179,11 +178,12 @@ def init_argparse():
     You can enable any combination of steps using flags below.""")
 
     parser.add_argument('file_string', type=str, help='aboslute or relative path (from Privitera_335) to image file (.fz or .fits accepted)')
-    parser.add_argument("-s","--stitch_fits", action="store_true", default=False, help="Stitch FITS files by extension")
+    parser.add_argument("-f","--stitch_fits", action="store_true", default=False, help="Stitch FITS files by extension")
     parser.add_argument("-z","--plot_zero_one_peaks", action="store_true", default=False, help="Plot fits to zero+one electron peaks")
     parser.add_argument("-a","--plot_all_peaks", action="store_true", default=False, help="Plot entire charge distribution with line at each peak")
     parser.add_argument("-g","--get_nonlinearity_at", action="store_true", default=False, help="Estimate nonlinearity at specified charge value(s) using parabolic fit")
     parser.add_argument("-n","--plot_nonlinearity", action="store_true", default=True, help="Plot nonlinearity curve with quadratic fit")
+    parser.add_argument("-s","--save_plots", action="store_true", default=False, help="Save all plots as jpeg images")
 
     args = parser.parse_args()
 
@@ -192,6 +192,5 @@ def init_argparse():
 if __name__ == '__main__':
 
     args = init_argparse()
-    #args = parser.parse_args()
 
     main(args)
