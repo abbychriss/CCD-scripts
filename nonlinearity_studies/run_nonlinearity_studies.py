@@ -42,21 +42,22 @@ def main(args):
     do_plot_nonlinearity = args.plot_nonlinearity
     save_plots = args.save_plots
 
+    data_path = '/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/VR_studies/'
     if do_stitch_images:
         # Stitch images together by extension
-        data_path = '/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/'
-        stitch_fits_image_string = file_string #f'{img_type}_img_CV_250x3500x500_bin1x1_125*'
+        stitch_fits_image_string = file_string
 
-        image_name = stitch_fits(data_path, directory='', image=stitch_fits_image_string, out_path='combined-fits/', print_header=False)
+        image_name = stitch_fits(data_path, directory='VR-4/', image=stitch_fits_image_string, out_path='combined-fits/', print_header=False)
         image_name = image_name.split('/')[-1]
     else:
-        image_name = file_string.split('/')[-1] #"avg_img_CV_250x3500x500_bin1x1_125_52_stitched.fits"
-        file_path = '/'.join(s for s in file_string.split('/')[:-1]) #"/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/combined-fits/"
+        image_name = file_string.split('/')[-1]
+        abs_data_path = '/'.join(s for s in file_string.split('/')[:-1])
+
 
     fig_path = "/Users/abbychriss/Desktop/Privitera_335/plots/nonlinearity_studies/"
     print(f'Analyzing image: {image_name}')
     # Get data from fits file
-    data_ext = get_fits(image_name)
+    data_ext = get_fits(data_path+'/combined-fits/'+image_name)
 
     # Fit zeroth and first electron peaks to double gaussians
     zero_one_counts_ext, zero_one_edges_ext, pedestals, gains, \

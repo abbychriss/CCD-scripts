@@ -589,12 +589,6 @@ def plot_nonlinearity(peaks_ext,
 #---------------- UTILITY FUNCTIONS ----------------------------
 
 #---------------- Get Fits ----------------------------
-"""def get_fits(file_name, path="/Users/abbychriss/Desktop/Privitera_335/"):
-    file=glob(path+'**/'+file_name,recursive=True)[0]
-    hdu_list = fits.open(file)
-    ext_charge=[hdu_list[i].data for i in range(1,5)]
-    return ext_charge"""
-
 def get_fits(file_input):
     """
     Load FITS extensions from a file.
@@ -632,6 +626,7 @@ def get_fits(file_input):
                 raise FileNotFoundError(f"No file found matching '{file_input}' in {data_root}")
             elif len(matches) > 1:
                 print(f"Warning: multiple matches found. Using first:\n{matches[0]}")
+                print(matches)
 
             file_path = matches[0]
 
