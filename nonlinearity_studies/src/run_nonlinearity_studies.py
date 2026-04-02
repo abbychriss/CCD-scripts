@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import numpy as np
-
 import argparse
 import os
 import sys
@@ -48,9 +47,9 @@ def main(args):
         stitch_fits_image_string = file_string
 
         image_name = stitch_fits(data_path, directory='VR-4/', image=stitch_fits_image_string, out_path='combined-fits/', print_header=False)
-        image_name = image_name.split('/')[-1]
+        image_name = os.path.basename(image_name) #image_name.split('/')[-1]
     else:
-        image_name = file_string.split('/')[-1]
+        image_name = os.path.basename(file_string) #file_string.split('/')[-1]
         abs_data_path = '/'.join(s for s in file_string.split('/')[:-1])
 
 

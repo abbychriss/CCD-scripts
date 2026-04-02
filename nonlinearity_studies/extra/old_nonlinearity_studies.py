@@ -1,24 +1,48 @@
+#!/usr/bin/env python3
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
+import argparse
+import os
 
-#plt.rcParams['text.usetex'] = True
+parser = argparse.ArgumentParser(description="""Run nonlinearity analysis pipeline.
 
-file = "avg_img_CV_250x3500x500_bin1x1_125_51_stitched.fits"
-file_path = "/Users/abbychriss/Desktop/Privitera_335/data/test_chamber/Am241-Spectra-data/1x1-bin/combined-fits/"
-fig_path = "/Users/abbychriss/Desktop/Privitera_335/"
+    This script can:
+    - Fit to zeroth/first electron peaks to compute pedestal, noise, gain
+    - Fit and plot all electron peaks using scipy find_peaks
+    - Plot nonlinearity curve
+                                    
+    You can enable any combination of steps using flags below.""")
+
+parser.add_argument('file', type=str, help='aboslute or relative (from directory where file lives) path to image (.fz or .fits accepted)')
+parser.add_argument('-o', '--output', type=str, default='./', help='aboslute or relative (from directory where file lives) path to directory for saving plots')
+parser.add_argument("-t","--plot_together", action="store_true", default=False, help="Plot all extensions on one subplot")
+parser.add_argument("-s","--save_plots", action="store_true", default=False, help="Save all plots as jpeg images")
+args = parser.parse_args()
+
+file = args.file
+
+base_file_name = os.path.basename(file)
+image_dir = os.path.dirname(os.path.abspath(file))
+image_full_path = os.path.join(image_dir, base_file_name)
+
+output_dir = args.output
+save_plots = args.save_plots
+
+# Reformat image name for writing out
+image_name = '_'.join(n for n in file.split('/')[-1].split('_')[:-3])
+
 plot_zero_one_peaks=True
-plot_all_peaks=False
+plot_all_peaks=True
 plot_nonlinearity=True
-save_plots=True
-subplots=False
+subplots=args.plot_together
+save_plots=args.save_plots
 
-hdu_list = fits.open(file_path+file)
+hdu_list = fits.open(image_full_path)
 #for stitched fits files
 ext_charge=[hdu_list[i].data.flatten() for i in range(1,5)]
-alphabet=['A','B','C','D']
 
 #fit a double gaussian to zero + 1 electron peak in each extension
 zero_one_peak_range=[[10,13],[11.5,14.5],[8,11.5],[8.5,11.5]]
@@ -46,7 +70,7 @@ if plot_nonlinearity and subplots:
     fig3.suptitle('Nonlinearity of Pixel Charge Fit')
     ax3=ax3.flatten()
 
-for ext,charge in enumerate(ext_charge):
+for ext, charge in enumerate(ext_charge):
 
     #-----------------PLOT 1: CALCULATE NOISE AND GAIN-------------------------------------------
     nbins=int(n*len(zero_one_peak_range[ext]))
@@ -64,7 +88,7 @@ for ext,charge in enumerate(ext_charge):
             ax1[ext].hist(charge_window,bins=nbins,range=tuple(zero_one_peak_range[ext]))
             ax1[ext].set_xlabel('Charge (ADU)')
             ax1[ext].set_ylabel('N')
-            ax1[ext].set_title(f'CCD {alphabet[ext]}')
+            ax1[ext].set_title(f'EXT {ext}}')
             
             coeff = tuple(popt)+(gain,)
             ax1[ext].plot(xdata, double_gauss(xdata, *popt), 'r',
@@ -78,7 +102,7 @@ for ext,charge in enumerate(ext_charge):
             plt.hist(charge_window,bins=nbins,range=tuple(zero_one_peak_range[ext]))
             plt.xlabel('Charge (ADU)')
             plt.ylabel('N')
-            plt.title(f'Combined Am-241 Pixel Charge Distribution, CCD {alphabet[ext]}')
+            plt.title(f'Combined Am-241 Pixel Charge Distribution, EXT {ext}}')
             
             coeff = tuple(popt)+(gain,)
             plt.plot(xdata, double_gauss(xdata, *popt), 'r',
@@ -88,6 +112,11 @@ for ext,charge in enumerate(ext_charge):
             plt.ylim(0,max(counts1)+2e5)
             plt.xlim(tuple(zero_one_peak_range[ext]))
             plt.legend()
+
+            if save_plots:
+                fig_name = output_dir+image_name+f'_nonlinearity_EXT{ext}'
+                plt.savefig(fig_name+'.jpeg',dpi=350)
+                print(f'Saved plot to {fig_name}.jpeg')
             plt.show()
 
     #-----------------PLOT 2: PEAKFINDER-------------------------------------------
@@ -105,7 +134,7 @@ for ext,charge in enumerate(ext_charge):
     if plot_all_peaks:
         if subplots:
             ax2[ext].hist(charge, bins=(hist_range[1]-hist_range[0])*20, range=hist_range)
-            ax2[ext].set_title(f'CCD {alphabet[ext]}')
+            ax2[ext].set_title(f'EXT {ext}}')
             ax2[ext].set_ylim(0,1000)
         else:
             plt.hist(charge, bins=(hist_range[1]-hist_range[0])*20, range=hist_range)
@@ -113,7 +142,7 @@ for ext,charge in enumerate(ext_charge):
             plt.ylabel('N')
             plt.ylim(0,1000)
             plt.xlim(hist_range)
-            plt.title(f'Peaks in Pixel Charge Distribution, CCD {alphabet[ext]}')
+            plt.title(f'Peaks in Pixel Charge Distribution, EXT {ext}}')
 
     # draw vertical lines and labels at each peak
     for i,p in enumerate(peaks):
@@ -146,11 +175,15 @@ for ext,charge in enumerate(ext_charge):
                     fontsize=6
                 )
     if not subplots:
+        if save_plots:
+            fig_name = output_dir+image_name+f'_all_peaks_EXT{ext}'
+            plt.savefig(fig_name+'.jpeg',dpi=350)
+            print(f'Saved plot to {fig_name}.jpeg')
         plt.show()
     
 
     #-----------------PLOT 3: NONLINEARITY FIT-------------------------------------------
-    print(f'Gain for CCD {alphabet[ext]} = {gain}')
+    print(f'Gain for EXT {ext}} = {gain}')
     peak_charge_e = np.array([centers[p]/gain for p in peaks])
     charge_minus_npeak = [(peak_charge_e[i] - i) for i in range(len(peaks))]
     fit_range=[600,1500,1000,600]
@@ -167,28 +200,34 @@ for ext,charge in enumerate(ext_charge):
             ax3[ext].set_ylim(min(charge_minus_npeak)-10,max(charge_minus_npeak)+15)
             ax3[ext].set_xlim(-100,hist_range[1]-400)
             ax3[ext].grid()
-            ax3[ext].set_title(f'CCD {alphabet[ext]}')
+            ax3[ext].set_title(f'EXT {ext}}')
         
         else:
+            plt.grid()
             plt.plot(peak_charge_e, parabola(peak_charge_e, *popt), color='r',
                         label=r'$%5.6f x^2 + %5.3f x + %5.3f$' %tuple(popt))
             plt.scatter(peak_charge_e,charge_minus_npeak, c='blue',s=2,alpha=0.5)
             plt.legend(loc="upper right", fontsize=8)
             plt.xlabel('Measured Pixel Charge (e-)')
             plt.ylabel('Measured Pixel Charge - Peak N. (e-)')
-            plt.title(f'Nonlinearity of Pixel Charge Fit, CCD {alphabet[ext]}')
+            plt.title(f'Nonlinearity of Pixel Charge Fit, EXT {ext}}')
             plt.ylim(min(charge_minus_npeak)-5,max(charge_minus_npeak)+15)
             plt.xlim(-100,hist_range[1]-400)
-            plt.grid()
+            if save_plots:
+                fig_name = output_dir+image_name+f'_nonlinearity_EXT{ext}'
+                plt.savefig(fig_name+'.jpeg',dpi=350)
+                print(f'Saved plot to {fig_name}.jpeg')
             plt.show()
 
 if save_plots:
     if subplots:
-        #fig3.savefig(fig_path+file[:-5]+'noise_fit.pdf')
+        fig_name = output_dir+image_name
         if plot_zero_one_peaks:
-            fig1.savefig(fig_path+file[:-5]+'_noise_fit.jpeg',dpi=350)
+            fig1.savefig(fig_name+'_zero_one_peaks.jpeg',dpi=350)
+        if plot_all_peaks:
+            fig1.savefig(fig_name+'_all_peaks.jpeg',dpi=350)
         if plot_nonlinearity:
-            fig3.savefig(fig_path+file[:-5]+'_nonlinearity.jpeg',dpi=350)
+            fig3.savefig(fig_name+'_nonlinearity.jpeg',dpi=350)
 
 if subplots:
     plt.show()
