@@ -6,8 +6,6 @@ import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
 from astropy.io import fits
 
-from scipy.optimize import curve_fit
-from scipy.signal import find_peaks
 from sklearn.cluster import k_means, AffinityPropagation, OPTICS, MeanShift, HDBSCAN
 from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
 from sklearn.preprocessing import StandardScaler

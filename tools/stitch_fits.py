@@ -5,7 +5,7 @@ import glob
 import os
 import argparse
 
-def stitch_fits(file_path, directory='03*/', image=f'avg*.fz', out_path='combined-fits/', print_header=False):
+def stitch_fits(file_path, directory='*/', image='avg*.fz', out_path='combined-fits/', print_header=False):
     """
     Stitch FITS files along the y-axis across multiple extensions.
 
@@ -21,6 +21,10 @@ def stitch_fits(file_path, directory='03*/', image=f'avg*.fz', out_path='combine
     """
 
     files = sorted(glob.glob(file_path+directory+image, recursive=True))
+
+    # Reformat image name for writing out
+    image_name = '_'.join(n for n in files[0].split('/')[-1].split('_')[:-3])
+
     nfiles = len(files)
 
     # inspect first file to get dimensions
@@ -39,7 +43,7 @@ def stitch_fits(file_path, directory='03*/', image=f'avg*.fz', out_path='combine
 
     out_path = file_path+out_path
     os.makedirs(out_path, exist_ok=True)
-    outname = out_path+image[:-1]+f'_{nfiles}_stitched.fits'
+    outname = out_path+image_name+f'_{nfiles}_stitched.fits'
 
     primary_header['NROW'] = primary_header['NROW']*nfiles
 
