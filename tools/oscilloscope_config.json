@@ -1,0 +1,14 @@
+{
+  "resource_str": "TCPIP::192.168.1.100::5025::SOCKET",
+  "channels": [1, 2, 3, 4],
+  "voltage_ranges": [2, 2, 2, 2],
+  "offsets": [0, 0, 0, 0],
+  "positions": [0, 0, 0, 0],
+  "acquisition_time_s": 1,
+  "plot": true,
+  "title": null,
+  "labels": null,
+  "save_plot": false,
+  "plot_name": null,
+  "fname": null
+}
