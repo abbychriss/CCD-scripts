@@ -279,6 +279,6 @@ if __name__ == '__main__':
 """Notes: 
 erase_ccd/epurge_ccd probe channels: ch2 (green) = VSUB (pin 60), ch3 (orange) = H2_A (pin 38), ch4 (blue) = V2_B (pin 28)
 clock_ccd('AcquireImage') probe channels: ch1 (yellow) = SW_2 (pin 47), ch2 (green) = H2_A, ch3 (orange) = H3_B (pin 35)
-
-'clock_ccd_sw_h2_h3_defaultV_100skip_0.5sec.csv'
+clock_ccd('AcquireImage') HORIZONTAL probe channels: ch2 (green) = H2_A, ch3 (orange) = H3_A, ch4 (blue) = H1_A
+clock_ccd('AcquireImage') VERTICAL probe channels: ch2 (green) = V2_A, ch3 (orange) = V3_A, ch4 (blue) = V1_B
 """
