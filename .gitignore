@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+build/
+dist/
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Plot / data outputs produced by the scripts
+*.jpg
+*.jpeg
+*.png
+*.pdf
+*.csv
+*.fits
+*.fz
+*.fits.gz
+
+# Run-time output dirs
+output/
+plots/
+combined-fits/
+log/
+panaSKImg_output/
+
+# Misc
+*.log
