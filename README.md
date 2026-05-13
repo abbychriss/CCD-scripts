@@ -1,8 +1,8 @@
-# Privitera_335 scripts
+# CCD Scripts
 
-Analysis and DAQ helper scripts for the test-chamber CCD setup.
+Analysis and DAQ helper scripts for CCD images for the DAMIC-M experiemnt.
 
-## Layout
+## Directory structure
 
 ```
 scripts/
