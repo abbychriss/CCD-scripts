@@ -21,8 +21,8 @@ SAVE_PLOTS="${3:-false}"   # default = false
 REL_PATH="$IMAGE_NAME"
 
 # If path contains "/data/", strip everything up to it
-if [[ "$IMAGE_NAME" == *"/data/test_chamber"* ]]; then
-    REL_PATH="${IMAGE_NAME#*/data/test_chamber}"
+if [[ "$IMAGE_NAME" == *"/data/"* ]]; then
+    REL_PATH="${IMAGE_NAME#*/data}"
 fi
 
 # -------- PATHS --------
@@ -36,7 +36,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # -------- OPTIONAL FLAG --------
 SAVE_FLAG=""
-if [[ "$SAVE_PLOTS" == "true" ]]; then
+if [[ "$SAVE_PLOTS" == "--save-plots" || "$SAVE_PLOTS" == "true" ]]; then
     SAVE_FLAG="--save-plots"
 fi
 

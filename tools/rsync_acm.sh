@@ -24,3 +24,5 @@ mkdir -p "$dest"
 rsync -av --include="$pattern" --exclude='*' \
     damicm@acmdev:/home/damicm/Soft/cdaq/run/$src/ \
     "$dest/"
+
+echo "Files saved to: $(cd "$dest" && pwd)"
