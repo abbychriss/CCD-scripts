@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
 from astropy.io import fits
+from astropy.stats import biweight_location, biweight_midvariance
 
 from sklearn.cluster import k_means, AffinityPropagation, OPTICS, MeanShift, HDBSCAN
 from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
@@ -22,6 +23,62 @@ def get_fits(file):
     hdu_list = fits.open(file)
     ext_charge=[hdu_list[i].data for i in range(1,5)]
     return ext_charge
+
+#--------------------PEDESTAL SUBTRACT--------------------------------------
+    # Subtracts a per-row or per-column pedestal from a 2D pixel-charge array.
+    # axis options: 'row', 'column'/'col', 'row_then_col', 'col_then_row'.
+    # Pixels more than n_std_to_mask deviations from the per-row/col location are
+    # masked out before estimating the pedestal so that signal pixels do not bias it.
+def pedestal_subtract(data, n_std_to_mask=3, axis='row', use_biweight_loc=True, use_biweight_midvar=True):
+
+    data = np.array(data, dtype=float)
+
+    def subtract_along(arr, ax):
+        if use_biweight_midvar:
+            std = np.sqrt(biweight_midvariance(arr, axis=ax))
+        else:
+            std = np.std(arr, axis=ax)
+        if use_biweight_loc:
+            avg_charge = biweight_location(arr, axis=ax)
+        else:
+            avg_charge = np.mean(arr, axis=ax)
+
+        avg_charge_b = np.expand_dims(avg_charge, axis=ax)
+        std_b = np.expand_dims(std, axis=ax)
+        mask = np.abs(arr - avg_charge_b) <= n_std_to_mask * std_b
+        masked = np.where(mask, arr, np.nan)
+
+        if use_biweight_loc:
+            avg_pedestal = biweight_location(masked, axis=ax, ignore_nan=True)
+        else:
+            avg_pedestal = np.nanmean(masked, axis=ax)
+
+        return arr - np.expand_dims(avg_pedestal, axis=ax)
+
+    if axis == 'row':
+        result = subtract_along(data, ax=1)
+    elif axis in ('column', 'col'):
+        result = subtract_along(data, ax=0)
+    elif axis == 'row_then_col':
+        result = subtract_along(subtract_along(data, ax=1), ax=0)
+    elif axis == 'col_then_row':
+        result = subtract_along(subtract_along(data, ax=0), ax=1)
+    else:
+        result = data
+
+    # Compute a single scalar noise estimate from the pedestal-subtracted image,
+    # masking pixels >n_std_to_mask away from zero so that signal does not bias it.
+    if use_biweight_midvar:
+        rough_std = np.sqrt(biweight_midvariance(result, ignore_nan=True))
+    else:
+        rough_std = np.nanstd(result)
+    clipped = np.where(np.abs(result) <= n_std_to_mask * rough_std, result, np.nan)
+    if use_biweight_midvar:
+        std_scalar = float(np.sqrt(biweight_midvariance(clipped, ignore_nan=True)))
+    else:
+        std_scalar = float(np.nanstd(clipped))
+
+    return result, std_scalar
 
 #--------------------CREATE CHARGE MASK--------------------------------------
     # Function create_mask inputs a float representing the minimum charge we want to fit clusters to 
@@ -256,7 +313,7 @@ def plot_data(charge,coord_range, save_plot=False, figname='data'):
     axd.set_ylabel("Pixel Y")
     axd.set_xlim(coord_range[0],coord_range[1])
     axd.set_ylim(coord_range[2],coord_range[3])
-    axd.set_title(f"Data (Pixel Charge > {charge_thresh} ADU), EXT {ext}")
+    axd.set_title(f"Data (Pixel Charge > {charge_thresh} ADU), EXT {ext +1}")
     if save_plot:
             plt.savefig(str(figname)+f'{coord_range[0]}-{coord_range[1]}x{coord_range[2]}-{coord_range[3]}_EXT{ext}.jpg',dpi=350)
     plt.show()
@@ -293,7 +350,7 @@ def plot_clusters(cluster_imgs, cmaps, n_clusters, nrows_subplot, ncols_subplot,
             cluster_img = cluster_imgs[i]
             cluster_alg = algorithms[i]
             plot_clusters_i(fig,ax,cluster_img,cluster_alg,cmap,n,tick_labels=tick_labels)
-        plt.suptitle(f'Clusters (Pixel Charge > {charge_thresh} ADU), EXT {ext}')
+        plt.suptitle(f'Clusters (Pixel Charge > {charge_thresh} ADU), EXT {ext + 1}')
         if save_plot:
             plt.savefig(str(figname)+''.join(f'_{alg[:1]}' for alg in algorithms)+'_EXT{ext}.jpg', dpi=350)
         plt.show()
@@ -305,9 +362,9 @@ def plot_clusters(cluster_imgs, cmaps, n_clusters, nrows_subplot, ncols_subplot,
             cluster_alg = algorithms[i]
             fig, ax = plt.subplots(1, 1, figsize=figsize_i, constrained_layout=True)
             plot_clusters_i(fig,ax,cluster_img,cluster_alg,cmap,n,tick_labels=tick_labels)
-            plt.suptitle(f'Clusters (Pixel Charge > {charge_thresh} ADU), EXT {ext}')
+            plt.suptitle(f'Clusters (Pixel Charge > {charge_thresh} ADU), EXT {ext + 1}')
             if save_plot:
-                plt.savefig(figname+f'_{cluster_alg}_EXT{ext}.jpg',dpi=350)
+                plt.savefig(figname+f'_{cluster_alg}_EXT{ext + 1}.jpg',dpi=350)
             plt.show()
 
 def plot_data_clusters(data, cluster_imgs, cmaps, ext, coord_range, 
@@ -379,10 +436,10 @@ def plot_data_clusters(data, cluster_imgs, cmaps, ext, coord_range,
                     break
         k+=1
 
-    fig.suptitle(f"Data and Clustering Algorithms\n(Pixel charge > {charge_thresh} ADU), EXT {ext}")
+    fig.suptitle(f"Data and Clustering Algorithms\n(Pixel charge > {charge_thresh} ADU), EXT {ext + 1}")
 
     if save_plot:
-        plt.savefig(str(figname)+'_data+clusters_'+'_'.join(f'{alg[:2]}' for alg in algorithms)+f'_EXT{ext}.jpg', dpi=350)
+        plt.savefig(str(figname)+'_data+clusters_'+'_'.join(f'{alg[:2]}' for alg in algorithms)+f'_EXT{ext + 1}.jpg', dpi=350)
 
     plt.show()
 
@@ -405,14 +462,30 @@ file_name = "itp_img_CV_250x3500x500_bin1x1_125_20260317_130159_36.fz"
 path = "/Users/abbychriss/Desktop/Privitera_335/"
 files=glob(path+'**/'+file_name,recursive=True)
 
-charge_thresh=40 #minimum charge in ADU to pass clustering algorithm
+charge_n_std=1.5  # minimum charge for clustering, in units of std of pedestal-subtracted image
 coord_range=[0,250,0,250] #[min_x, max_x, min_y, max_y]
+
+do_pedestal_subtract=False
+pedestal_axis='row'        # 'row', 'col', 'row_then_col', or 'col_then_row'
+pedestal_n_std_to_mask=3
 
 for i, file in enumerate(files):
 
     ext_charge = get_fits(file)
 
     for ext,charge in enumerate(ext_charge):
+
+        if do_pedestal_subtract:
+            charge, charge_std = pedestal_subtract(charge,
+                                                   n_std_to_mask=pedestal_n_std_to_mask,
+                                                   axis=pedestal_axis)
+        else:
+            # Compute std without subtracting so the threshold can still be expressed in n_std.
+            _, charge_std = pedestal_subtract(charge,
+                                              n_std_to_mask=pedestal_n_std_to_mask,
+                                              axis=pedestal_axis)
+
+        charge_thresh = charge_n_std * charge_std
 
         coords, charge_stacked_scaled = create_mask(charge_thresh,
                                                     charge,
@@ -487,7 +560,7 @@ for i, file in enumerate(files):
 
         n_clusters = [len(np.unique(label[label != -1])) for label in labels]
 
-        print(f"EXT {ext}: " + ", ".join(f"{algorithms[i]} found {n_clusters[i]}" for i in range(len(algorithms))))
+        print(f"EXT {ext + 1}: " + ", ".join(f"{algorithms[i]} found {n_clusters[i]}" for i in range(len(algorithms))))
 
         # Create discrete colormap that includes background (white), noise (black), and cluster colors
         cmaps = [get_full_bg_noise_cmap(n) for n in n_clusters]
@@ -527,6 +600,6 @@ for i, file in enumerate(files):
                                nrows_cluster=2,#1
                                ncols_cluster = 2,#len(algorithms)
                                save_plot=True,
-                               figname='/Users/abbychriss/Desktop/Privitera_335/plots/'+'_'.join(file.split('/')[-1].split('_')[i] \
+                               figname='/Users/abbychriss/Privitera_335/plots/'+'_'.join(file.split('/')[-1].split('_')[i] \
                                                                                                  for i in range(len(file.split('/')[-1].split('_'))-1))
                                )
